@@ -59,3 +59,4 @@ This project implements several heuristic algorithms to solve a variation of the
 - The number of nodes selected (`k`) is set to half of the total nodes in each instance.
 - Outputs include the best path and statistics for each heuristic.
 - Plots illustrate the best solutions with nodes and paths.
+- [Solutions checker link](https://docs.google.com/spreadsheets/d/1cMPvny_W1nO3iCBbCOxVQUbcc8mtbxj6kKmskqUlDbY/edit?gid=1250532698#gid=1250532698)
