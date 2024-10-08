@@ -36,6 +36,9 @@ bin/
 
 ### VS Code ###
 .vscode/
+.venv/
+venv/
 
 ### Mac OS ###
 .DS_Store
+
