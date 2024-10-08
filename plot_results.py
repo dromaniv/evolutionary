@@ -55,7 +55,7 @@ def validate_path(path):
         return True
 
 # Dynamically retrieve all instances from the inputs directory
-instances = [os.path.splitext(f)[0] for f in os.listdir(instances_dir) if f.lower().endswith('.csv')]
+instances = sorted([os.path.splitext(f)[0] for f in os.listdir(instances_dir) if f.lower().endswith('.csv')])
 if not instances:
     print("No instances found in the 'inputs' directory.")
     exit()
