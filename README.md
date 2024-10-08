@@ -25,7 +25,7 @@ This project implements several heuristic algorithms to solve a variation of the
 
 2. **Compile the Java Code**:
    ```sh
-   javac Main.java
+   javac src/Main.java
    ```
 
 3. **Run the Java Program**:
