@@ -1,5 +1,6 @@
 .idea/
 plots/
+animations/
 outputs/
 *.class
 
