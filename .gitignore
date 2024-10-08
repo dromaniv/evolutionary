@@ -1,6 +1,7 @@
 .idea/
 plots/
 outputs/
+*.class
 
 ### IntelliJ IDEA ###
 out/

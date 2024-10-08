@@ -30,7 +30,7 @@ This project implements several heuristic algorithms to solve a variation of the
 
 3. **Run the Java Program**:
    ```sh
-   java Main
+   java -cp src Main
    ```
     - This will process each instance, run heuristics, and save results in `outputs/`.
 
