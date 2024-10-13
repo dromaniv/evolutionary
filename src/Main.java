@@ -177,7 +177,8 @@ class RandomSolution extends Heuristic {
 }
 
 /**
- * Implements the Nearest Neighbor heuristic by adding nodes to the end of the path.
+ * Implements the Nearest Neighbor heuristic by adding nodes to the end of the path,
+ * considering the sum of Euclidean distance and node cost.
  */
 class NearestNeighborEnd extends Heuristic {
 
@@ -188,25 +189,31 @@ class NearestNeighborEnd extends Heuristic {
         if (n == 0) {
             return new Solution(new ArrayList<>(), 0);
         }
+
         List<Integer> path = new ArrayList<>();
         path.add(startNode);
         Set<Integer> selected = new HashSet<>();
         selected.add(startNode);
         int[][] distanceMatrix = instance.getDistanceMatrix();
 
+        // Keep adding nodes only to the end of the path
         while (path.size() < k) {
             int last = path.get(path.size() - 1);
             int nearest = -1;
             int minDist = Integer.MAX_VALUE;
+
+            // Find the nearest unselected node
             for (int node = 0; node < n; node++) {
                 if (!selected.contains(node)) {
                     int dist = distanceMatrix[last][node];
-                    if (dist < minDist) {
-                        minDist = dist;
+                    int effectiveDistance = dist + nodes.get(node).getCost(); // Adding cost to the distance
+                    if (effectiveDistance < minDist) {
+                        minDist = effectiveDistance;
                         nearest = node;
                     }
                 }
             }
+
             if (nearest != -1) {
                 path.add(nearest);
                 selected.add(nearest);
@@ -240,8 +247,11 @@ class NearestNeighborEnd extends Heuristic {
     }
 }
 
+
+
 /**
- * Implements the Nearest Neighbor heuristic by adding nodes at any position in the path.
+ * Implements the Nearest Neighbor heuristic by adding nodes at any position in the path,
+ * considering the sum of Euclidean distance and node cost.
  */
 class NearestNeighborAny extends Heuristic {
 
@@ -252,47 +262,47 @@ class NearestNeighborAny extends Heuristic {
         if (n == 0) {
             return new Solution(new ArrayList<>(), 0);
         }
+
         List<Integer> path = new ArrayList<>();
         path.add(startNode);
         Set<Integer> selected = new HashSet<>();
         selected.add(startNode);
         int[][] distanceMatrix = instance.getDistanceMatrix();
 
+        // Keep adding nodes, choosing the nearest one and finding the best insertion point
         while (path.size() < k) {
             int nearest = -1;
             int minDist = Integer.MAX_VALUE;
+
+            // Find the nearest unselected node
             for (int node = 0; node < n; node++) {
                 if (!selected.contains(node)) {
                     for (int p_node : path) {
                         int dist = distanceMatrix[p_node][node];
-                        if (dist < minDist) {
-                            minDist = dist;
+                        int effectiveDistance = dist + nodes.get(node).getCost(); // Adding cost to the distance
+                        if (effectiveDistance < minDist) {
+                            minDist = effectiveDistance;
                             nearest = node;
                         }
                     }
                 }
             }
+
             if (nearest != -1) {
-                // Find the best position to insert the nearest node
-                int bestIncrease = Integer.MAX_VALUE;
-                int bestPos = -1;
+                // Find the best position to insert the nearest node (simplified logic)
+                int bestPos = 0;
+                int minIncrease = Integer.MAX_VALUE;
                 for (int i = 0; i < path.size(); i++) {
                     int current = path.get(i);
                     int next = path.get((i + 1) % path.size());
                     int increase = distanceMatrix[current][nearest] + distanceMatrix[nearest][next] - distanceMatrix[current][next];
-                    if (increase < bestIncrease) {
-                        bestIncrease = increase;
+                    if (increase < minIncrease) {
+                        minIncrease = increase;
                         bestPos = i + 1;
                     }
                 }
-                if (bestPos != -1) {
-                    path.add(bestPos, nearest);
-                    selected.add(nearest);
-                } else {
-                    // If no best position found, append at the end
-                    path.add(nearest);
-                    selected.add(nearest);
-                }
+                path.add(bestPos, nearest);
+                selected.add(nearest);
             } else {
                 break; // No more nodes to add
             }
@@ -322,6 +332,8 @@ class NearestNeighborAny extends Heuristic {
         return totalDistance + totalCost;
     }
 }
+
+
 
 /**
  * Implements the Greedy Cycle heuristic.
@@ -482,7 +494,7 @@ class Statistics {
 public class Main {
     public static void main(String[] args) {
         // Define the input directory
-        String inputDirPath = "inputs";
+        String inputDirPath = "Evolutionary Computation\\task_1\\inputs";
         File inputDir = new File(inputDirPath);
 
         if (!inputDir.exists() || !inputDir.isDirectory()) {
@@ -620,7 +632,7 @@ public class Main {
         }
 
         // After processing all instances, run the Python script
-        String pythonScript = "plot_results.py";
+        String pythonScript = "Evolutionary Computation\\plots_results.py";
         System.out.println("All instances processed. Executing '" + pythonScript + "'...");
         try {
             ProcessBuilder pb = new ProcessBuilder("python", pythonScript);
