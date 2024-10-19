@@ -432,8 +432,8 @@ class GreedyWeightedRegret extends Heuristic {
     private double w2; // Weight for best increase
 
     public GreedyWeightedRegret() {
-        this.w1 = 1.0; // Default weights
-        this.w2 = 1.0;
+        this.w1 = 2.5;
+        this.w2 = 1.1;
     }
 
     public GreedyWeightedRegret(double w1, double w2) {
