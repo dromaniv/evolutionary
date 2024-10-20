@@ -612,6 +612,7 @@ public class Main {
             try {
                 System.out.println("Reading nodes from CSV...");
                 instance.readCSV(filePath);
+
                 System.out.println("Computing distance matrix...");
                 instance.computeDistanceMatrix();
             } catch (IOException e) {
@@ -640,6 +641,7 @@ public class Main {
 
             // Initialize a map to store solutions per method
             Map<String, List<Solution>> methodSolutions = new LinkedHashMap<>();
+            Map<String, Double> methodTimes = new LinkedHashMap<>();
             for (Heuristic heuristic : heuristics) {
                 String methodName = heuristic.getClass().getSimpleName();
                 methodSolutions.put(methodName, new ArrayList<>());
@@ -650,11 +652,22 @@ public class Main {
                 String methodName = heuristic.getClass().getSimpleName();
                 System.out.println("Generating solutions using " + methodName + "...");
                 List<Solution> solutions = new ArrayList<>();
+
+                // Start timing
+                long startTime = System.nanoTime();
+
                 for (int startNode = 0; startNode < n; startNode++) {
                     Solution sol = heuristic.generateSolution(instance, k, startNode);
                     solutions.add(sol);
                 }
+
+                // End timing
+                long endTime = System.nanoTime();
+                long duration = endTime - startTime;
+                double durationMs = duration / 1e6;
+
                 methodSolutions.get(methodName).addAll(solutions);
+                methodTimes.put(methodName, durationMs);
             }
 
             // Compute statistics for each method and save the best path
@@ -667,6 +680,7 @@ public class Main {
                 System.out.println("Min Objective: " + stats.getMinObjective());
                 System.out.println("Max Objective: " + stats.getMaxObjective());
                 System.out.printf("Average Objective: %.2f%n", stats.getAvgObjective());
+                System.out.printf("Time taken: %.2f ms%n", methodTimes.get(methodName));
                 System.out.println("Best Solution Path: " + stats.getBestPath() + "\n");
 
                 // Save best path to CSV
