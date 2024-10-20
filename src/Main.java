@@ -1,19 +1,13 @@
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.BufferedWriter;
-import java.io.FileWriter;
+import java.io.*;
 import java.util.*;
-import java.lang.Math;
-import java.io.File;
 
 /**
  * Represents a node with x and y coordinates and a cost.
  */
 class Node {
-    private int x;
-    private int y;
-    private int cost;
+    private final int x;
+    private final int y;
+    private final int cost;
 
     public Node(int x, int y, int cost) {
         this.x = x;
@@ -38,7 +32,7 @@ class Node {
  * Represents a problem instance with nodes and a distance matrix.
  */
 class ProblemInstance {
-    private List<Node> nodes;
+    private final List<Node> nodes;
     private int[][] distanceMatrix;
 
     public ProblemInstance() {
@@ -65,7 +59,6 @@ class ProblemInstance {
                 nodes.add(new Node(x, y, cost));
             } catch (NumberFormatException e) {
                 // Skip rows with invalid integers
-                continue;
             }
         }
         reader.close();
@@ -103,8 +96,8 @@ class ProblemInstance {
  * Represents a solution with a path and its objective value.
  */
 class Solution {
-    private List<Integer> path;
-    private int objectiveValue;
+    private final List<Integer> path;
+    private final int objectiveValue;
 
     public Solution(List<Integer> path, int objectiveValue) {
         this.path = new ArrayList<>(path);
@@ -134,31 +127,11 @@ abstract class Heuristic {
      * @return A Solution object
      */
     public abstract Solution generateSolution(ProblemInstance instance, int k, int startNode);
-}
-
-/**
- * Implements the Random Solution heuristic.
- */
-class RandomSolution extends Heuristic {
-
-    @Override
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
-        List<Node> nodes = instance.getNodes();
-        int n = nodes.size();
-        List<Integer> selectedNodes = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            selectedNodes.add(i);
-        }
-        Collections.shuffle(selectedNodes, random);
-        selectedNodes = selectedNodes.subList(0, Math.min(k, selectedNodes.size())); // Select k nodes randomly
-        int objective = computeObjective(selectedNodes, instance);
-        return new Solution(selectedNodes, objective);
-    }
 
     /**
      * Computes the objective function: sum of path lengths + sum of node costs
      */
-    private int computeObjective(List<Integer> path, ProblemInstance instance) {
+    protected int computeObjective(List<Integer> path, ProblemInstance instance) {
         int totalDistance = 0;
         int k = path.size();
         int[][] distanceMatrix = instance.getDistanceMatrix();
@@ -174,6 +147,84 @@ class RandomSolution extends Heuristic {
         }
         return totalDistance + totalCost;
     }
+
+    protected static class InsertionPosition {
+        int position;
+        int increase;
+
+        public InsertionPosition(int position, int increase) {
+            this.position = position;
+            this.increase = increase;
+        }
+    }
+
+    protected static class InsertionInfo {
+        int position;
+        int bestIncrease;
+        int secondBestIncrease;
+
+        public InsertionInfo(int position, int bestIncrease, int secondBestIncrease) {
+            this.position = position;
+            this.bestIncrease = bestIncrease;
+            this.secondBestIncrease = secondBestIncrease;
+        }
+    }
+
+    protected InsertionPosition findBestInsertionPosition(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
+        int bestPos = -1;
+        int minIncrease = Integer.MAX_VALUE;
+        int pathSize = path.size();
+        for (int i = 0; i < pathSize; i++) {
+            int current = path.get(i);
+            int next = path.get((i + 1) % pathSize);
+            int increase = distanceMatrix[current][nodeToInsert] + distanceMatrix[nodeToInsert][next] - distanceMatrix[current][next];
+            if (increase < minIncrease) {
+                minIncrease = increase;
+                bestPos = i + 1;
+            }
+        }
+        return new InsertionPosition(bestPos, minIncrease);
+    }
+
+    protected InsertionInfo findBestAndSecondBestInsertion(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
+        int bestIncrease = Integer.MAX_VALUE;
+        int secondBestIncrease = Integer.MAX_VALUE;
+        int bestPos = -1;
+
+        for (int i = 0; i < path.size(); i++) {
+            int current = path.get(i);
+            int next = path.get((i + 1) % path.size());
+            int increase = distanceMatrix[current][nodeToInsert] + distanceMatrix[nodeToInsert][next] - distanceMatrix[current][next];
+
+            if (increase < bestIncrease) {
+                secondBestIncrease = bestIncrease;
+                bestIncrease = increase;
+                bestPos = i + 1;
+            } else if (increase < secondBestIncrease) {
+                secondBestIncrease = increase;
+            }
+        }
+        return new InsertionInfo(bestPos, bestIncrease, secondBestIncrease);
+    }
+}
+
+/**
+ * Implements the Random Solution heuristic.
+ */
+class RandomSolution extends Heuristic {
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        List<Node> nodes = instance.getNodes();
+        int n = nodes.size();
+        List<Integer> selectedNodes = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            selectedNodes.add(i);
+        }
+        Collections.shuffle(selectedNodes, random);
+        selectedNodes = selectedNodes.subList(0, Math.min(k, selectedNodes.size()));
+        int objective = computeObjective(selectedNodes, instance);
+        return new Solution(selectedNodes, objective);
+    }
 }
 
 /**
@@ -181,7 +232,6 @@ class RandomSolution extends Heuristic {
  * considering the sum of Euclidean distance and node cost.
  */
 class NearestNeighborEnd extends Heuristic {
-
     @Override
     public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
         List<Node> nodes = instance.getNodes();
@@ -196,17 +246,15 @@ class NearestNeighborEnd extends Heuristic {
         selected.add(startNode);
         int[][] distanceMatrix = instance.getDistanceMatrix();
 
-        // Keep adding nodes only to the end of the path
         while (path.size() < k) {
-            int last = path.get(path.size() - 1);
+            int last = path.getLast();
             int nearest = -1;
             int minDist = Integer.MAX_VALUE;
 
-            // Find the nearest unselected node
             for (int node = 0; node < n; node++) {
                 if (!selected.contains(node)) {
                     int dist = distanceMatrix[last][node];
-                    int effectiveDistance = dist + nodes.get(node).getCost(); // Adding cost to the distance
+                    int effectiveDistance = dist + nodes.get(node).getCost();
                     if (effectiveDistance < minDist) {
                         minDist = effectiveDistance;
                         nearest = node;
@@ -225,36 +273,13 @@ class NearestNeighborEnd extends Heuristic {
         int objective = computeObjective(path, instance);
         return new Solution(path, objective);
     }
-
-    /**
-     * Computes the objective function: sum of path lengths + sum of node costs
-     */
-    private int computeObjective(List<Integer> path, ProblemInstance instance) {
-        int totalDistance = 0;
-        int k = path.size();
-        int[][] distanceMatrix = instance.getDistanceMatrix();
-        List<Node> nodes = instance.getNodes();
-        for (int i = 0; i < k; i++) {
-            int from = path.get(i);
-            int to = path.get((i + 1) % k);
-            totalDistance += distanceMatrix[from][to];
-        }
-        int totalCost = 0;
-        for (int node : path) {
-            totalCost += nodes.get(node).getCost();
-        }
-        return totalDistance + totalCost;
-    }
 }
-
-
 
 /**
  * Implements the Nearest Neighbor heuristic by adding nodes at any position in the path,
  * considering the sum of Euclidean distance and node cost.
  */
 class NearestNeighborAny extends Heuristic {
-
     @Override
     public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
         List<Node> nodes = instance.getNodes();
@@ -269,17 +294,15 @@ class NearestNeighborAny extends Heuristic {
         selected.add(startNode);
         int[][] distanceMatrix = instance.getDistanceMatrix();
 
-        // Keep adding nodes, choosing the nearest one and finding the best insertion point
         while (path.size() < k) {
             int nearest = -1;
             int minDist = Integer.MAX_VALUE;
 
-            // Find the nearest unselected node
             for (int node = 0; node < n; node++) {
                 if (!selected.contains(node)) {
                     for (int p_node : path) {
                         int dist = distanceMatrix[p_node][node];
-                        int effectiveDistance = dist + nodes.get(node).getCost(); // Adding cost to the distance
+                        int effectiveDistance = dist + nodes.get(node).getCost();
                         if (effectiveDistance < minDist) {
                             minDist = effectiveDistance;
                             nearest = node;
@@ -289,19 +312,8 @@ class NearestNeighborAny extends Heuristic {
             }
 
             if (nearest != -1) {
-                // Find the best position to insert the nearest node (simplified logic)
-                int bestPos = 0;
-                int minIncrease = Integer.MAX_VALUE;
-                for (int i = 0; i < path.size(); i++) {
-                    int current = path.get(i);
-                    int next = path.get((i + 1) % path.size());
-                    int increase = distanceMatrix[current][nearest] + distanceMatrix[nearest][next] - distanceMatrix[current][next];
-                    if (increase < minIncrease) {
-                        minIncrease = increase;
-                        bestPos = i + 1;
-                    }
-                }
-                path.add(bestPos, nearest);
+                InsertionPosition insertion = findBestInsertionPosition(path, nearest, distanceMatrix);
+                path.add(insertion.position, nearest);
                 selected.add(nearest);
             } else {
                 break; // No more nodes to add
@@ -311,35 +323,12 @@ class NearestNeighborAny extends Heuristic {
         int objective = computeObjective(path, instance);
         return new Solution(path, objective);
     }
-
-    /**
-     * Computes the objective function: sum of path lengths + sum of node costs
-     */
-    private int computeObjective(List<Integer> path, ProblemInstance instance) {
-        int totalDistance = 0;
-        int k = path.size();
-        int[][] distanceMatrix = instance.getDistanceMatrix();
-        List<Node> nodes = instance.getNodes();
-        for (int i = 0; i < k; i++) {
-            int from = path.get(i);
-            int to = path.get((i + 1) % k);
-            totalDistance += distanceMatrix[from][to];
-        }
-        int totalCost = 0;
-        for (int node : path) {
-            totalCost += nodes.get(node).getCost();
-        }
-        return totalDistance + totalCost;
-    }
 }
-
-
 
 /**
  * Implements the Greedy Cycle heuristic.
  */
 class GreedyCycle extends Heuristic {
-
     @Override
     public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
         List<Node> nodes = instance.getNodes();
@@ -358,17 +347,8 @@ class GreedyCycle extends Heuristic {
             int bestScore = Integer.MAX_VALUE;
             for (int node = 0; node < n; node++) {
                 if (!selected.contains(node)) {
-                    // Find the minimum increase in distance for insertion
-                    int minIncrease = Integer.MAX_VALUE;
-                    for (int i = 0; i < path.size(); i++) {
-                        int current = path.get(i);
-                        int next = path.get((i + 1) % path.size());
-                        int increase = distanceMatrix[current][node] + distanceMatrix[node][next] - distanceMatrix[current][next];
-                        if (increase < minIncrease) {
-                            minIncrease = increase;
-                        }
-                    }
-                    // Define score as increase + node cost
+                    InsertionPosition insertion = findBestInsertionPosition(path, node, distanceMatrix);
+                    int minIncrease = insertion.increase;
                     int score = minIncrease + nodes.get(node).getCost();
                     if (score < bestScore) {
                         bestScore = score;
@@ -377,23 +357,11 @@ class GreedyCycle extends Heuristic {
                 }
             }
             if (bestNode != -1) {
-                // Insert the best_node at the position that minimizes the increase
-                int bestIncrease = Integer.MAX_VALUE;
-                int bestPos = -1;
-                for (int i = 0; i < path.size(); i++) {
-                    int current = path.get(i);
-                    int next = path.get((i + 1) % path.size());
-                    int increase = distanceMatrix[current][bestNode] + distanceMatrix[bestNode][next] - distanceMatrix[current][next];
-                    if (increase < bestIncrease) {
-                        bestIncrease = increase;
-                        bestPos = i + 1;
-                    }
-                }
-                if (bestPos != -1) {
-                    path.add(bestPos, bestNode);
+                InsertionPosition insertion = findBestInsertionPosition(path, bestNode, distanceMatrix);
+                if (insertion.position != -1) {
+                    path.add(insertion.position, bestNode);
                     selected.add(bestNode);
                 } else {
-                    // Append at the end if no better position found
                     path.add(bestNode);
                     selected.add(bestNode);
                 }
@@ -405,25 +373,132 @@ class GreedyCycle extends Heuristic {
         int objective = computeObjective(path, instance);
         return new Solution(path, objective);
     }
+}
 
-    /**
-     * Computes the objective function: sum of path lengths + sum of node costs
-     */
-    private int computeObjective(List<Integer> path, ProblemInstance instance) {
-        int totalDistance = 0;
-        int k = path.size();
-        int[][] distanceMatrix = instance.getDistanceMatrix();
+/**
+ * Implements the Greedy 2-Regret heuristic.
+ */
+class Greedy2Regret extends Heuristic {
+
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
         List<Node> nodes = instance.getNodes();
-        for (int i = 0; i < k; i++) {
-            int from = path.get(i);
-            int to = path.get((i + 1) % k);
-            totalDistance += distanceMatrix[from][to];
+        int n = nodes.size();
+        if (n == 0) {
+            return new Solution(new ArrayList<>(), 0);
         }
-        int totalCost = 0;
-        for (int node : path) {
-            totalCost += nodes.get(node).getCost();
+        List<Integer> path = new ArrayList<>();
+        path.add(startNode);
+        Set<Integer> selected = new HashSet<>();
+        selected.add(startNode);
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+
+        while (path.size() < k) {
+            int maxRegretNode = -1;
+            int maxRegretValue = Integer.MIN_VALUE;
+            int bestInsertionPosition = -1;
+
+            for (int node = 0; node < n; node++) {
+                if (selected.contains(node)) {
+                    continue;
+                }
+                int bestIncrease = Integer.MAX_VALUE;
+                int secondBestIncrease = Integer.MAX_VALUE;
+                int bestPos = -1;
+
+                // Evaluate all possible insertion positions
+                for (int i = 0; i < path.size(); i++) {
+                    int current = path.get(i);
+                    int next = path.get((i + 1) % path.size());
+                    int increase = distanceMatrix[current][node] + distanceMatrix[node][next] - distanceMatrix[current][next] + nodes.get(node).getCost();
+
+                    if (increase < bestIncrease) {
+                        secondBestIncrease = bestIncrease;
+                        bestIncrease = increase;
+                        bestPos = i + 1;
+                    } else if (increase < secondBestIncrease) {
+                        secondBestIncrease = increase;
+                    }
+                }
+
+                int regretValue = secondBestIncrease - bestIncrease;
+                if (regretValue > maxRegretValue) {
+                    maxRegretValue = regretValue;
+                    maxRegretNode = node;
+                    bestInsertionPosition = bestPos;
+                }
+            }
+
+            if (maxRegretNode != -1 && bestInsertionPosition != -1) {
+                path.add(bestInsertionPosition, maxRegretNode);
+                selected.add(maxRegretNode);
+            } else {
+                break; // No more nodes to add
+            }
         }
-        return totalDistance + totalCost;
+
+        int objective = computeObjective(path, instance);
+        return new Solution(path, objective);
+    }
+}
+
+/**
+ * Implements the Greedy heuristic with weighted sum criterion (2-Regret + Best Increase).
+ */
+class GreedyWeightedRegret extends Heuristic {
+    private final double w1; // Weight for regret
+    private final double w2; // Weight for best increase
+
+    public GreedyWeightedRegret() {
+        this.w1 = 0.5;
+        this.w2 = 0.5;
+    }
+
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        List<Node> nodes = instance.getNodes();
+        int n = nodes.size();
+        if (n == 0) {
+            return new Solution(new ArrayList<>(), 0);
+        }
+        List<Integer> path = new ArrayList<>();
+        path.add(startNode);
+        Set<Integer> selected = new HashSet<>();
+        selected.add(startNode);
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+
+        while (path.size() < k) {
+            int bestNode = -1;
+            double bestWeightedValue = Double.NEGATIVE_INFINITY;
+            int bestInsertionPosition = -1;
+
+            for (int node = 0; node < n; node++) {
+                if (selected.contains(node)) {
+                    continue;
+                }
+                InsertionInfo insertionInfo = findBestAndSecondBestInsertion(path, node, distanceMatrix);
+
+                int regretValue = insertionInfo.secondBestIncrease - insertionInfo.bestIncrease;
+                double weightedValue = w1 * regretValue - w2 * insertionInfo.bestIncrease;
+                weightedValue -= nodes.get(node).getCost();
+
+                if (weightedValue > bestWeightedValue) {
+                    bestWeightedValue = weightedValue;
+                    bestNode = node;
+                    bestInsertionPosition = insertionInfo.position;
+                }
+            }
+
+            if (bestNode != -1 && bestInsertionPosition != -1) {
+                path.add(bestInsertionPosition, bestNode);
+                selected.add(bestNode);
+            } else {
+                break; // No more nodes to add
+            }
+        }
+
+        int objective = computeObjective(path, instance);
+        return new Solution(path, objective);
     }
 }
 
@@ -431,10 +506,10 @@ class GreedyCycle extends Heuristic {
  * Utility class to compute statistics for a list of solutions.
  */
 class Statistics {
-    private int minObjective;
-    private int maxObjective;
-    private double avgObjective;
-    private List<Integer> bestPath;
+    private final int minObjective;
+    private final int maxObjective;
+    private final double avgObjective;
+    private final List<Integer> bestPath;
 
     public Statistics(int minObjective, int maxObjective, double avgObjective, List<Integer> bestPath) {
         this.minObjective = minObjective;
@@ -494,7 +569,7 @@ class Statistics {
 public class Main {
     public static void main(String[] args) {
         // Define the input directory
-        String inputDirPath = "Evolutionary Computation\\task_1\\inputs";
+        String inputDirPath = "inputs";
         File inputDir = new File(inputDirPath);
 
         if (!inputDir.exists() || !inputDir.isDirectory()) {
@@ -503,7 +578,12 @@ public class Main {
         }
 
         // List all CSV files in the input directory
-        File[] inputFiles = inputDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".csv"));
+        File[] inputFiles = inputDir.listFiles((_, name) -> name.toLowerCase().endsWith(".csv"));
+
+        // Sort the files by name
+        if (inputFiles != null) {
+            Arrays.sort(inputFiles, Comparator.comparing(File::getName));
+        }
 
         if (inputFiles == null || inputFiles.length == 0) {
             System.err.println("No CSV files found in the input directory.");
@@ -516,6 +596,8 @@ public class Main {
         heuristics.add(new NearestNeighborEnd());
         heuristics.add(new NearestNeighborAny());
         heuristics.add(new GreedyCycle());
+        heuristics.add(new Greedy2Regret());
+        heuristics.add(new GreedyWeightedRegret());
 
         // Iterate over each input file
         for (File inputFile : inputFiles) {
@@ -530,6 +612,7 @@ public class Main {
             try {
                 System.out.println("Reading nodes from CSV...");
                 instance.readCSV(filePath);
+
                 System.out.println("Computing distance matrix...");
                 instance.computeDistanceMatrix();
             } catch (IOException e) {
@@ -558,53 +641,33 @@ public class Main {
 
             // Initialize a map to store solutions per method
             Map<String, List<Solution>> methodSolutions = new LinkedHashMap<>();
+            Map<String, Double> methodTimes = new LinkedHashMap<>();
             for (Heuristic heuristic : heuristics) {
                 String methodName = heuristic.getClass().getSimpleName();
-                switch (methodName) {
-                    case "RandomSolution":
-                        methodName = "Random_Solution";
-                        break;
-                    case "NearestNeighborEnd":
-                        methodName = "Nearest_Neighbor_End_Insertion";
-                        break;
-                    case "NearestNeighborAny":
-                        methodName = "Nearest_Neighbor_Any_Insertion";
-                        break;
-                    case "GreedyCycle":
-                        methodName = "Greedy_Cycle";
-                        break;
-                    default:
-                        methodName = heuristic.getClass().getSimpleName();
-                }
                 methodSolutions.put(methodName, new ArrayList<>());
             }
 
             // Generate solutions for each heuristic and each start node
             for (Heuristic heuristic : heuristics) {
                 String methodName = heuristic.getClass().getSimpleName();
-                switch (methodName) {
-                    case "RandomSolution":
-                        methodName = "Random_Solution";
-                        break;
-                    case "NearestNeighborEnd":
-                        methodName = "Nearest_Neighbor_End_Insertion";
-                        break;
-                    case "NearestNeighborAny":
-                        methodName = "Nearest_Neighbor_Any_Insertion";
-                        break;
-                    case "GreedyCycle":
-                        methodName = "Greedy_Cycle";
-                        break;
-                    default:
-                        methodName = heuristic.getClass().getSimpleName();
-                }
                 System.out.println("Generating solutions using " + methodName + "...");
                 List<Solution> solutions = new ArrayList<>();
+
+                // Start timing
+                long startTime = System.nanoTime();
+
                 for (int startNode = 0; startNode < n; startNode++) {
                     Solution sol = heuristic.generateSolution(instance, k, startNode);
                     solutions.add(sol);
                 }
+
+                // End timing
+                long endTime = System.nanoTime();
+                long duration = endTime - startTime;
+                double durationMs = duration / 1e6;
+
                 methodSolutions.get(methodName).addAll(solutions);
+                methodTimes.put(methodName, durationMs);
             }
 
             // Compute statistics for each method and save the best path
@@ -617,6 +680,7 @@ public class Main {
                 System.out.println("Min Objective: " + stats.getMinObjective());
                 System.out.println("Max Objective: " + stats.getMaxObjective());
                 System.out.printf("Average Objective: %.2f%n", stats.getAvgObjective());
+                System.out.printf("Time taken: %.2f ms%n", methodTimes.get(methodName));
                 System.out.println("Best Solution Path: " + stats.getBestPath() + "\n");
 
                 // Save best path to CSV
