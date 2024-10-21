@@ -450,8 +450,13 @@ class GreedyWeightedRegret extends Heuristic {
     private final double w2; // Weight for best increase
 
     public GreedyWeightedRegret() {
-        this.w1 = 0.5;
-        this.w2 = 0.5;
+        this.w1 = 1;
+        this.w2 = 1;
+    }
+
+    public GreedyWeightedRegret(double w1, double w2) {
+        this.w1 = w1;
+        this.w2 = w2;
     }
 
     @Override
@@ -479,8 +484,7 @@ class GreedyWeightedRegret extends Heuristic {
                 InsertionInfo insertionInfo = findBestAndSecondBestInsertion(path, node, distanceMatrix);
 
                 int regretValue = insertionInfo.secondBestIncrease - insertionInfo.bestIncrease;
-                double weightedValue = w1 * regretValue - w2 * insertionInfo.bestIncrease;
-                weightedValue -= nodes.get(node).getCost();
+                double weightedValue = w1 * regretValue - w2 * (insertionInfo.bestIncrease + nodes.get(node).getCost());
 
                 if (weightedValue > bestWeightedValue) {
                     bestWeightedValue = weightedValue;
