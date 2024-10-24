@@ -582,7 +582,7 @@ public class Main {
         }
 
         // List all CSV files in the input directory
-        File[] inputFiles = inputDir.listFiles((_, name) -> name.toLowerCase().endsWith(".csv"));
+        File[] inputFiles = inputDir.listFiles((__, name) -> name.toLowerCase().endsWith(".csv"));
 
         // Sort the files by name
         if (inputFiles != null) {
