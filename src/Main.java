@@ -147,6 +147,39 @@ abstract class Heuristic {
         }
         return totalDistance + totalCost;
     }
+
+    protected static class InsertionInfo {
+        int position;
+        int bestIncrease;
+        int secondBestIncrease;
+
+        public InsertionInfo(int position, int bestIncrease, int secondBestIncrease) {
+            this.position = position;
+            this.bestIncrease = bestIncrease;
+            this.secondBestIncrease = secondBestIncrease;
+        }
+    }
+
+    protected InsertionInfo findBestAndSecondBestInsertion(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
+        int bestIncrease = Integer.MAX_VALUE;
+        int secondBestIncrease = Integer.MAX_VALUE;
+        int bestPos = -1;
+
+        for (int i = 0; i < path.size(); i++) {
+            int current = path.get(i);
+            int next = path.get((i + 1) % path.size());
+            int increase = distanceMatrix[current][nodeToInsert] + distanceMatrix[nodeToInsert][next] - distanceMatrix[current][next];
+
+            if (increase < bestIncrease) {
+                secondBestIncrease = bestIncrease;
+                bestIncrease = increase;
+                bestPos = i + 1;
+            } else if (increase < secondBestIncrease) {
+                secondBestIncrease = increase;
+            }
+        }
+        return new InsertionInfo(bestPos, bestIncrease, secondBestIncrease);
+    }
 }
 
 /**
@@ -169,9 +202,21 @@ class RandomSolution extends Heuristic {
 }
 
 /**
- * Implements the Greedy 2-Regret heuristic.
+ * Implements the Greedy heuristic with weighted sum criterion (2-Regret + Best Increase).
  */
-class Greedy2Regret extends Heuristic {
+class GreedyWeightedRegret extends Heuristic {
+    private final double w1; // Weight for regret
+    private final double w2; // Weight for best increase
+
+    public GreedyWeightedRegret() {
+        this.w1 = 1;
+        this.w2 = 1;
+    }
+
+    public GreedyWeightedRegret(double w1, double w2) {
+        this.w1 = w1;
+        this.w2 = w2;
+    }
 
     @Override
     public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
@@ -187,44 +232,29 @@ class Greedy2Regret extends Heuristic {
         int[][] distanceMatrix = instance.getDistanceMatrix();
 
         while (path.size() < k) {
-            int maxRegretNode = -1;
-            int maxRegretValue = Integer.MIN_VALUE;
+            int bestNode = -1;
+            double bestWeightedValue = Double.NEGATIVE_INFINITY;
             int bestInsertionPosition = -1;
 
             for (int node = 0; node < n; node++) {
                 if (selected.contains(node)) {
                     continue;
                 }
-                int bestIncrease = Integer.MAX_VALUE;
-                int secondBestIncrease = Integer.MAX_VALUE;
-                int bestPos = -1;
+                InsertionInfo insertionInfo = findBestAndSecondBestInsertion(path, node, distanceMatrix);
 
-                // Evaluate all possible insertion positions
-                for (int i = 0; i < path.size(); i++) {
-                    int current = path.get(i);
-                    int next = path.get((i + 1) % path.size());
-                    int increase = distanceMatrix[current][node] + distanceMatrix[node][next] - distanceMatrix[current][next];
+                int regretValue = insertionInfo.secondBestIncrease - insertionInfo.bestIncrease;
+                double weightedValue = w1 * regretValue - w2 * (insertionInfo.bestIncrease + nodes.get(node).getCost());
 
-                    if (increase < bestIncrease) {
-                        secondBestIncrease = bestIncrease;
-                        bestIncrease = increase;
-                        bestPos = i + 1;
-                    } else if (increase < secondBestIncrease) {
-                        secondBestIncrease = increase;
-                    }
-                }
-
-                int regretValue = secondBestIncrease - bestIncrease;
-                if (regretValue > maxRegretValue) {
-                    maxRegretValue = regretValue;
-                    maxRegretNode = node;
-                    bestInsertionPosition = bestPos;
+                if (weightedValue > bestWeightedValue) {
+                    bestWeightedValue = weightedValue;
+                    bestNode = node;
+                    bestInsertionPosition = insertionInfo.position;
                 }
             }
 
-            if (maxRegretNode != -1 && bestInsertionPosition != -1) {
-                path.add(bestInsertionPosition, maxRegretNode);
-                selected.add(maxRegretNode);
+            if (bestNode != -1 && bestInsertionPosition != -1) {
+                path.add(bestInsertionPosition, bestNode);
+                selected.add(bestNode);
             } else {
                 break; // No more nodes to add
             }
@@ -239,7 +269,7 @@ class Greedy2Regret extends Heuristic {
  * Implements Local Search algorithms with specified options.
  */
 class LocalSearch extends Heuristic {
-    private final Random random = new Random();
+    private final Random random = new Random(42);
 
     enum LocalSearchType { STEEPEST, GREEDY }
 
@@ -555,7 +585,7 @@ public class Main {
         }
 
         // List all CSV files in the input directory
-        File[] inputFiles = inputDir.listFiles((__, name) -> name.toLowerCase().endsWith(".csv"));
+        File[] inputFiles = inputDir.listFiles((_, name) -> name.toLowerCase().endsWith(".csv"));
 
         // Sort the files by name
         if (inputFiles != null) {
@@ -569,7 +599,7 @@ public class Main {
 
         // Initialize heuristics
         Heuristic randomHeuristic = new RandomSolution();
-        Heuristic greedyHeuristic = new Greedy2Regret();
+        Heuristic greedyHeuristic = new GreedyWeightedRegret();
         LocalSearch localSearch = new LocalSearch();
 
         // Define combinations of options
