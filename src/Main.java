@@ -117,7 +117,7 @@ class Solution {
  * Abstract class for heuristic methods.
  */
 abstract class Heuristic {
-    protected Random random = new Random();
+    protected Random random = new Random(42);
 
     /**
      * Generates a solution based on the heuristic.
@@ -269,8 +269,6 @@ class GreedyWeightedRegret extends Heuristic {
  * Implements Local Search algorithms with specified options.
  */
 class LocalSearch extends Heuristic {
-    private final Random random = new Random(42);
-
     enum LocalSearchType { STEEPEST, GREEDY }
 
     enum IntraRouteMoveType { TWO_NODES_EXCHANGE, TWO_EDGES_EXCHANGE }
