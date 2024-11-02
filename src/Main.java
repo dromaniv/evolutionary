@@ -1,6 +1,5 @@
 import java.io.*;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Represents a node with x and y coordinates and a cost.
@@ -30,12 +29,11 @@ class Node {
 }
 
 /**
- * Represents a problem instance with nodes, a distance matrix, and candidate edges.
+ * Represents a problem instance with nodes and a distance matrix.
  */
 class ProblemInstance {
     private final List<Node> nodes;
     private int[][] distanceMatrix;
-    private List<List<Integer>> candidateEdges; // For each node, its 10 nearest neighbors
 
     public ProblemInstance() {
         nodes = new ArrayList<>();
@@ -43,7 +41,6 @@ class ProblemInstance {
 
     /**
      * Reads nodes from a CSV file. Each line should have x;y;cost
-     *
      * @param filePath Path to the CSV file
      * @throws IOException If file reading fails
      */
@@ -86,37 +83,12 @@ class ProblemInstance {
         }
     }
 
-    /**
-     * Computes the candidate edges for each node based on the sum of edge length and node cost.
-     *
-     * @param numCandidates Number of nearest neighbors to consider for each node
-     */
-    public void computeCandidateEdges(int numCandidates) {
-        int n = nodes.size();
-        candidateEdges = new ArrayList<>(n);
-        for (int i = 0; i < n; i++) {
-            List<Integer> neighbors = new ArrayList<>();
-            for (int j = 0; j < n; j++) {
-                if (i == j) continue;
-                neighbors.add(j);
-            }
-            final int currentI = i; // Make a final copy for lambda
-            neighbors.sort(Comparator.comparingInt(j -> distanceMatrix[currentI][j] + nodes.get(j).getCost()));
-            List<Integer> topNeighbors = neighbors.stream().limit(numCandidates).collect(Collectors.toList());
-            candidateEdges.add(topNeighbors);
-        }
-    }
-
     public List<Node> getNodes() {
         return nodes;
     }
 
     public int[][] getDistanceMatrix() {
         return distanceMatrix;
-    }
-
-    public List<List<Integer>> getCandidateEdges() {
-        return candidateEdges;
     }
 }
 
@@ -138,6 +110,399 @@ class Solution {
 
     public int getObjectiveValue() {
         return objectiveValue;
+    }
+}
+
+/**
+ * Abstract class for heuristic methods.
+ */
+abstract class Heuristic {
+    protected Random random = new Random();
+
+    /**
+     * Generates a solution based on the heuristic.
+     * @param instance The problem instance
+     * @param k Number of nodes to select
+     * @param startNode The starting node index
+     * @return A Solution object
+     */
+    public abstract Solution generateSolution(ProblemInstance instance, int k, int startNode);
+
+    /**
+     * Computes the objective function: sum of path lengths + sum of node costs
+     */
+    protected int computeObjective(List<Integer> path, ProblemInstance instance) {
+        int totalDistance = 0;
+        int k = path.size();
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+        List<Node> nodes = instance.getNodes();
+        for (int i = 0; i < k; i++) {
+            int from = path.get(i);
+            int to = path.get((i + 1) % k);
+            totalDistance += distanceMatrix[from][to];
+        }
+        int totalCost = 0;
+        for (int node : path) {
+            totalCost += nodes.get(node).getCost();
+        }
+        return totalDistance + totalCost;
+    }
+
+    protected static class InsertionPosition {
+        int position;
+        int increase;
+
+        public InsertionPosition(int position, int increase) {
+            this.position = position;
+            this.increase = increase;
+        }
+    }
+
+    protected static class InsertionInfo {
+        int position;
+        int bestIncrease;
+        int secondBestIncrease;
+
+        public InsertionInfo(int position, int bestIncrease, int secondBestIncrease) {
+            this.position = position;
+            this.bestIncrease = bestIncrease;
+            this.secondBestIncrease = secondBestIncrease;
+        }
+    }
+
+    protected InsertionPosition findBestInsertionPosition(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
+        int bestPos = -1;
+        int minIncrease = Integer.MAX_VALUE;
+        int pathSize = path.size();
+        for (int i = 0; i < pathSize; i++) {
+            int current = path.get(i);
+            int next = path.get((i + 1) % pathSize);
+            int increase = distanceMatrix[current][nodeToInsert] + distanceMatrix[nodeToInsert][next] - distanceMatrix[current][next];
+            if (increase < minIncrease) {
+                minIncrease = increase;
+                bestPos = i + 1;
+            }
+        }
+        return new InsertionPosition(bestPos, minIncrease);
+    }
+
+    protected InsertionInfo findBestAndSecondBestInsertion(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
+        int bestIncrease = Integer.MAX_VALUE;
+        int secondBestIncrease = Integer.MAX_VALUE;
+        int bestPos = -1;
+
+        for (int i = 0; i < path.size(); i++) {
+            int current = path.get(i);
+            int next = path.get((i + 1) % path.size());
+            int increase = distanceMatrix[current][nodeToInsert] + distanceMatrix[nodeToInsert][next] - distanceMatrix[current][next];
+
+            if (increase < bestIncrease) {
+                secondBestIncrease = bestIncrease;
+                bestIncrease = increase;
+                bestPos = i + 1;
+            } else if (increase < secondBestIncrease) {
+                secondBestIncrease = increase;
+            }
+        }
+        return new InsertionInfo(bestPos, bestIncrease, secondBestIncrease);
+    }
+}
+
+/**
+ * Implements the Random Solution heuristic.
+ */
+class RandomSolution extends Heuristic {
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        List<Node> nodes = instance.getNodes();
+        int n = nodes.size();
+        List<Integer> selectedNodes = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            selectedNodes.add(i);
+        }
+        Collections.shuffle(selectedNodes, random);
+        selectedNodes = selectedNodes.subList(0, Math.min(k, selectedNodes.size()));
+        int objective = computeObjective(selectedNodes, instance);
+        return new Solution(selectedNodes, objective);
+    }
+}
+
+/**
+ * Implements the Nearest Neighbor heuristic by adding nodes to the end of the path,
+ * considering the sum of Euclidean distance and node cost.
+ */
+class NearestNeighborEnd extends Heuristic {
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        List<Node> nodes = instance.getNodes();
+        int n = nodes.size();
+        if (n == 0) {
+            return new Solution(new ArrayList<>(), 0);
+        }
+
+        List<Integer> path = new ArrayList<>();
+        path.add(startNode);
+        Set<Integer> selected = new HashSet<>();
+        selected.add(startNode);
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+
+        while (path.size() < k) {
+            int last = path.getLast();
+            int nearest = -1;
+            int minDist = Integer.MAX_VALUE;
+
+            for (int node = 0; node < n; node++) {
+                if (!selected.contains(node)) {
+                    int dist = distanceMatrix[last][node];
+                    int effectiveDistance = dist + nodes.get(node).getCost();
+                    if (effectiveDistance < minDist) {
+                        minDist = effectiveDistance;
+                        nearest = node;
+                    }
+                }
+            }
+
+            if (nearest != -1) {
+                path.add(nearest);
+                selected.add(nearest);
+            } else {
+                break; // No more nodes to add
+            }
+        }
+
+        int objective = computeObjective(path, instance);
+        return new Solution(path, objective);
+    }
+}
+
+/**
+ * Implements the Nearest Neighbor heuristic by adding nodes at any position in the path,
+ * considering the sum of Euclidean distance and node cost.
+ */
+class NearestNeighborAny extends Heuristic {
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        List<Node> nodes = instance.getNodes();
+        int n = nodes.size();
+        if (n == 0) {
+            return new Solution(new ArrayList<>(), 0);
+        }
+
+        List<Integer> path = new ArrayList<>();
+        path.add(startNode);
+        Set<Integer> selected = new HashSet<>();
+        selected.add(startNode);
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+
+        while (path.size() < k) {
+            int nearest = -1;
+            int minDist = Integer.MAX_VALUE;
+
+            for (int node = 0; node < n; node++) {
+                if (!selected.contains(node)) {
+                    for (int p_node : path) {
+                        int dist = distanceMatrix[p_node][node];
+                        int effectiveDistance = dist + nodes.get(node).getCost();
+                        if (effectiveDistance < minDist) {
+                            minDist = effectiveDistance;
+                            nearest = node;
+                        }
+                    }
+                }
+            }
+
+            if (nearest != -1) {
+                InsertionPosition insertion = findBestInsertionPosition(path, nearest, distanceMatrix);
+                path.add(insertion.position, nearest);
+                selected.add(nearest);
+            } else {
+                break; // No more nodes to add
+            }
+        }
+
+        int objective = computeObjective(path, instance);
+        return new Solution(path, objective);
+    }
+}
+
+/**
+ * Implements the Greedy Cycle heuristic.
+ */
+class GreedyCycle extends Heuristic {
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        List<Node> nodes = instance.getNodes();
+        int n = nodes.size();
+        if (n == 0) {
+            return new Solution(new ArrayList<>(), 0);
+        }
+        List<Integer> path = new ArrayList<>();
+        path.add(startNode);
+        Set<Integer> selected = new HashSet<>();
+        selected.add(startNode);
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+
+        while (path.size() < k) {
+            int bestNode = -1;
+            int bestScore = Integer.MAX_VALUE;
+            for (int node = 0; node < n; node++) {
+                if (!selected.contains(node)) {
+                    InsertionPosition insertion = findBestInsertionPosition(path, node, distanceMatrix);
+                    int minIncrease = insertion.increase;
+                    int score = minIncrease + nodes.get(node).getCost();
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestNode = node;
+                    }
+                }
+            }
+            if (bestNode != -1) {
+                InsertionPosition insertion = findBestInsertionPosition(path, bestNode, distanceMatrix);
+                if (insertion.position != -1) {
+                    path.add(insertion.position, bestNode);
+                    selected.add(bestNode);
+                } else {
+                    path.add(bestNode);
+                    selected.add(bestNode);
+                }
+            } else {
+                break; // No more nodes to add
+            }
+        }
+
+        int objective = computeObjective(path, instance);
+        return new Solution(path, objective);
+    }
+}
+
+/**
+ * Implements the Greedy 2-Regret heuristic.
+ */
+class Greedy2Regret extends Heuristic {
+
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        List<Node> nodes = instance.getNodes();
+        int n = nodes.size();
+        if (n == 0) {
+            return new Solution(new ArrayList<>(), 0);
+        }
+        List<Integer> path = new ArrayList<>();
+        path.add(startNode);
+        Set<Integer> selected = new HashSet<>();
+        selected.add(startNode);
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+
+        while (path.size() < k) {
+            int maxRegretNode = -1;
+            int maxRegretValue = Integer.MIN_VALUE;
+            int bestInsertionPosition = -1;
+
+            for (int node = 0; node < n; node++) {
+                if (selected.contains(node)) {
+                    continue;
+                }
+                int bestIncrease = Integer.MAX_VALUE;
+                int secondBestIncrease = Integer.MAX_VALUE;
+                int bestPos = -1;
+
+                // Evaluate all possible insertion positions
+                for (int i = 0; i < path.size(); i++) {
+                    int current = path.get(i);
+                    int next = path.get((i + 1) % path.size());
+                    int increase = distanceMatrix[current][node] + distanceMatrix[node][next] - distanceMatrix[current][next] + nodes.get(node).getCost();
+
+                    if (increase < bestIncrease) {
+                        secondBestIncrease = bestIncrease;
+                        bestIncrease = increase;
+                        bestPos = i + 1;
+                    } else if (increase < secondBestIncrease) {
+                        secondBestIncrease = increase;
+                    }
+                }
+
+                int regretValue = secondBestIncrease - bestIncrease;
+                if (regretValue > maxRegretValue) {
+                    maxRegretValue = regretValue;
+                    maxRegretNode = node;
+                    bestInsertionPosition = bestPos;
+                }
+            }
+
+            if (maxRegretNode != -1 && bestInsertionPosition != -1) {
+                path.add(bestInsertionPosition, maxRegretNode);
+                selected.add(maxRegretNode);
+            } else {
+                break; // No more nodes to add
+            }
+        }
+
+        int objective = computeObjective(path, instance);
+        return new Solution(path, objective);
+    }
+}
+
+/**
+ * Implements the Greedy heuristic with weighted sum criterion (2-Regret + Best Increase).
+ */
+class GreedyWeightedRegret extends Heuristic {
+    private final double w1; // Weight for regret
+    private final double w2; // Weight for best increase
+
+    public GreedyWeightedRegret() {
+        this.w1 = 1;
+        this.w2 = 1;
+    }
+
+    public GreedyWeightedRegret(double w1, double w2) {
+        this.w1 = w1;
+        this.w2 = w2;
+    }
+
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        List<Node> nodes = instance.getNodes();
+        int n = nodes.size();
+        if (n == 0) {
+            return new Solution(new ArrayList<>(), 0);
+        }
+        List<Integer> path = new ArrayList<>();
+        path.add(startNode);
+        Set<Integer> selected = new HashSet<>();
+        selected.add(startNode);
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+
+        while (path.size() < k) {
+            int bestNode = -1;
+            double bestWeightedValue = Double.NEGATIVE_INFINITY;
+            int bestInsertionPosition = -1;
+
+            for (int node = 0; node < n; node++) {
+                if (selected.contains(node)) {
+                    continue;
+                }
+                InsertionInfo insertionInfo = findBestAndSecondBestInsertion(path, node, distanceMatrix);
+
+                int regretValue = insertionInfo.secondBestIncrease - insertionInfo.bestIncrease;
+                double weightedValue = w1 * regretValue - w2 * (insertionInfo.bestIncrease + nodes.get(node).getCost());
+
+                if (weightedValue > bestWeightedValue) {
+                    bestWeightedValue = weightedValue;
+                    bestNode = node;
+                    bestInsertionPosition = insertionInfo.position;
+                }
+            }
+
+            if (bestNode != -1 && bestInsertionPosition != -1) {
+                path.add(bestInsertionPosition, bestNode);
+                selected.add(bestNode);
+            } else {
+                break; // No more nodes to add
+            }
+        }
+
+        int objective = computeObjective(path, instance);
+        return new Solution(path, objective);
     }
 }
 
@@ -175,7 +540,6 @@ class Statistics {
 
     /**
      * Computes statistics from a list of solutions.
-     *
      * @param solutions List of Solution objects
      * @return A Statistics object
      */
@@ -204,180 +568,12 @@ class Statistics {
 }
 
 /**
- * Implements the Steepest Local Search with Candidate Moves.
- */
-/**
- * Implements the Steepest Local Search with Candidate Moves.
- */
-class LocalSearch {
-    private List<List<Integer>> candidateEdges; // Accessed from ProblemInstance
-
-    /**
-     * Represents a potential move with its delta objective.
-     */
-    private static class PotentialMove {
-        MoveType moveType;
-        int pos1;
-        int pos2; // For intra-route moves
-        int node;  // For inter-route moves
-        int delta;
-
-        public PotentialMove(MoveType moveType, int pos1, int pos2, int node, int delta) {
-            this.moveType = moveType;
-            this.pos1 = pos1;
-            this.pos2 = pos2;
-            this.node = node;
-            this.delta = delta;
-        }
-    }
-
-        /**
-     * Computes the objective function: sum of path lengths + sum of node costs
-     *
-     * @param path           The current path
-     * @param distanceMatrix The distance matrix
-     * @param nodes          The list of nodes
-     * @return The objective value
-     */
-    private int computeObjective(List<Integer> path, int[][] distanceMatrix, List<Node> nodes) {
-        int totalDistance = 0;
-        int k = path.size();
-        for (int i = 0; i < k; i++) {
-            int from = path.get(i);
-            int to = path.get((i + 1) % k);
-            totalDistance += distanceMatrix[from][to];
-        }
-        int totalCost = 0;
-        for (int node : path) {
-            totalCost += nodes.get(node).getCost();
-        }
-        return totalDistance + totalCost;
-    }
-
-    private enum MoveType { INTRA_ROUTE_TWO_EDGES_EXCHANGE, INTER_ROUTE_NODE_SWAP }
-
-    /**
-     * Performs the steepest local search with candidate moves on the given initial solution.
-     *
-     * @param initialSolution The starting solution
-     * @param instance        The problem instance
-     * @return An improved Solution object
-     */
-    public Solution performSteepestLocalSearch(Solution initialSolution, ProblemInstance instance) {
-        // Initialize
-        List<Integer> path = new ArrayList<>(initialSolution.getPath());
-        int[][] distanceMatrix = instance.getDistanceMatrix();
-        List<Node> nodes = instance.getNodes();
-        this.candidateEdges = instance.getCandidateEdges();
-        Set<Integer> selectedNodes = new HashSet<>(path);
-
-        boolean improvement = true;
-        while (improvement) {
-            improvement = false;
-            PotentialMove bestMove = null;
-
-            List<PotentialMove> allPotentialMoves = new ArrayList<>();
-
-            // Generate all possible intra-route two-edges exchanges that introduce at least one candidate edge
-            int n = path.size();
-            for (int i = 0; i < n; i++) {
-                for (int j = i + 2; j < n; j++) { // Ensure that we are not swapping adjacent edges
-                    // Calculate the potential delta
-                    int iPrev = path.get((i - 1 + n) % n);
-                    int iNode = path.get(i);
-                    int jNode = path.get(j);
-                    int jNext = path.get((j + 1) % n);
-
-                    // Current edges: (iPrev - iNode), (jNode - jNext)
-                    // New edges: (iPrev - jNode), (iNode - jNext)
-                    int currentDistance = distanceMatrix[iPrev][iNode] + distanceMatrix[jNode][jNext];
-                    int newDistance = distanceMatrix[iPrev][jNode] + distanceMatrix[iNode][jNext];
-                    int delta = newDistance - currentDistance;
-
-                    // Check if at least one new edge is a candidate edge
-                    boolean introducesCandidateEdge = false;
-                    if (candidateEdges.get(iPrev).contains(jNode) || candidateEdges.get(jNode).contains(iPrev) ||
-                        candidateEdges.get(iNode).contains(jNext) || candidateEdges.get(jNext).contains(iNode)) {
-                        introducesCandidateEdge = true;
-                    }
-
-                    if (introducesCandidateEdge) {
-                        allPotentialMoves.add(new PotentialMove(MoveType.INTRA_ROUTE_TWO_EDGES_EXCHANGE, i, j, -1, delta));
-                    }
-                }
-            }
-
-            // Generate all possible inter-route node swaps that introduce at least one candidate edge
-            for (int i = 0; i < n; i++) {
-                int selectedNode = path.get(i);
-                for (int u = 0; u < nodes.size(); u++) {
-                    if (selectedNodes.contains(u)) continue; // Skip already selected nodes
-
-                    /*
-                        Swap selectedNode with u:
-                        - Remove selectedNode: (prev - selectedNode - next) becomes (prev - next)
-                        - Add u: (prev - u - next)
-                        Delta distance: (distanceMatrix[prev][u] + distanceMatrix[u][next]) - (distanceMatrix[prev][selectedNode] + distanceMatrix[selectedNode][next])
-                        Delta cost: cost[u] - cost[selectedNode]
-                    */
-                    int prev = path.get((i - 1 + n) % n);
-                    int next = path.get((i + 1) % n);
-                    int deltaDistance = distanceMatrix[prev][u] + distanceMatrix[u][next] - distanceMatrix[prev][selectedNode] - distanceMatrix[selectedNode][next];
-                    int deltaCost = nodes.get(u).getCost() - nodes.get(selectedNode).getCost();
-                    int deltaTotal = deltaDistance + deltaCost;
-
-                    // Check if introducing u introduces at least one candidate edge
-                    boolean introducesCandidateEdge = false;
-                    if (candidateEdges.get(prev).contains(u) || candidateEdges.get(u).contains(prev) ||
-                        candidateEdges.get(u).contains(next) || candidateEdges.get(next).contains(u)) {
-                        introducesCandidateEdge = true;
-                    }
-
-                    if (introducesCandidateEdge) {
-                        allPotentialMoves.add(new PotentialMove(MoveType.INTER_ROUTE_NODE_SWAP, i, -1, u, deltaTotal));
-                    }
-                }
-            }
-
-            // Find the best move (steepest)
-            for (PotentialMove move : allPotentialMoves) {
-                if (bestMove == null || move.delta < bestMove.delta) {
-                    bestMove = move;
-                }
-            }
-
-            // Apply the best move if it improves the solution
-            if (bestMove != null && bestMove.delta < 0) {
-                improvement = true;
-                if (bestMove.moveType == MoveType.INTRA_ROUTE_TWO_EDGES_EXCHANGE) {
-                    // Perform two-edges exchange between positions bestMove.pos1 and bestMove.pos2
-                    int pos1 = bestMove.pos1;
-                    int pos2 = bestMove.pos2;
-                    Collections.swap(path, pos1, pos2);
-                } else if (bestMove.moveType == MoveType.INTER_ROUTE_NODE_SWAP) {
-                    // Swap selected node at position bestMove.pos1 with node 'bestMove.node'
-                    int pos = bestMove.pos1;
-                    int oldNode = path.get(pos); // Capture the old node before swapping
-                    path.set(pos, bestMove.node);
-                    selectedNodes.remove(oldNode); // Remove the old node from selectedNodes
-                    selectedNodes.add(bestMove.node); // Add the new node to selectedNodes
-                }
-            }
-        }
-
-        // Recompute objective value
-        int newObjective = computeObjective(path, distanceMatrix, nodes);
-        return new Solution(path, newObjective);
-    }
-}
-
-/**
  * The main class to execute the program.
  */
 public class Main {
     public static void main(String[] args) {
         // Define the input directory
-        String inputDirPath = "C:\\Users\\wazus\\OneDrive\\Desktop\\Evolutionary 3\\evolutionary\\inputs";
+        String inputDirPath = "inputs";
         File inputDir = new File(inputDirPath);
 
         if (!inputDir.exists() || !inputDir.isDirectory()) {
@@ -386,7 +582,7 @@ public class Main {
         }
 
         // List all CSV files in the input directory
-        File[] inputFiles = inputDir.listFiles((__, name) -> name.toLowerCase().endsWith(".csv"));
+        File[] inputFiles = inputDir.listFiles((_, name) -> name.toLowerCase().endsWith(".csv"));
 
         // Sort the files by name
         if (inputFiles != null) {
@@ -398,8 +594,14 @@ public class Main {
             return;
         }
 
-        // Initialize local search
-        LocalSearch localSearch = new LocalSearch();
+        // Initialize heuristics
+        List<Heuristic> heuristics = new ArrayList<>();
+        heuristics.add(new RandomSolution());
+        heuristics.add(new NearestNeighborEnd());
+        heuristics.add(new NearestNeighborAny());
+        heuristics.add(new GreedyCycle());
+        heuristics.add(new Greedy2Regret());
+        heuristics.add(new GreedyWeightedRegret());
 
         // Iterate over each input file
         for (File inputFile : inputFiles) {
@@ -417,9 +619,6 @@ public class Main {
 
                 System.out.println("Computing distance matrix...");
                 instance.computeDistanceMatrix();
-
-                System.out.println("Computing candidate edges...");
-                instance.computeCandidateEdges(10); // 10 nearest neighbors
             } catch (IOException e) {
                 System.err.println("Error reading the CSV file '" + fileName + "': " + e.getMessage());
                 continue; // Proceed to the next file
@@ -444,64 +643,64 @@ public class Main {
                 }
             }
 
-            // Initialize a list to store all solutions
-            List<Solution> allSolutions = new ArrayList<>();
-
-            // Initialize the distance matrix and nodes
-            int[][] distanceMatrix = instance.getDistanceMatrix();
-            List<Node> nodes = instance.getNodes();
-
-            // Generate 200 random starting solutions
-            System.out.println("Generating 200 random starting solutions and performing local search...");
-
-            // Initialize random
-            Random random = new Random();
-
-            long startTime = System.nanoTime();
-
-            for (int run = 0; run < 200; run++) {
-                // Generate a random starting solution
-                System.out.println("Run " + (run + 200) + " / 1");
-                List<Integer> selectedNodes = generateRandomSolution(n, k, random);
-                //System.out.println("Selected nodes: " + selectedNodes);
-                int objective = computeObjective(selectedNodes, distanceMatrix, nodes);
-                //System.out.println("Initial objective: " + objective);
-                Solution initialSolution = new Solution(selectedNodes, objective);
-                //System.out.println("Initial path: " + initialSolution.getPath());
-
-                // Perform steepest local search with candidate moves
-                Solution improvedSolution = localSearch.performSteepestLocalSearch(initialSolution, instance);
-                //System.out.println("Improved objective: " + improvedSolution.getObjectiveValue());
-                allSolutions.add(improvedSolution);
-                //System.out.println("Improved path: " + improvedSolution.getPath() + "\n");
+            // Initialize a map to store solutions per method
+            Map<String, List<Solution>> methodSolutions = new LinkedHashMap<>();
+            Map<String, Double> methodTimes = new LinkedHashMap<>();
+            for (Heuristic heuristic : heuristics) {
+                String methodName = heuristic.getClass().getSimpleName();
+                methodSolutions.put(methodName, new ArrayList<>());
             }
 
-            long endTime = System.nanoTime();
-            double durationMs = (endTime - startTime) / 1e6;
-            System.out.printf("Local search completed in %.2f ms.%n%n", durationMs);
+            // Generate solutions for each heuristic and each start node
+            for (Heuristic heuristic : heuristics) {
+                String methodName = heuristic.getClass().getSimpleName();
+                System.out.println("Generating solutions using " + methodName + "...");
+                List<Solution> solutions = new ArrayList<>();
 
-            // Compute statistics
-            Statistics stats = Statistics.computeStatistics(allSolutions);
-            System.out.println("--- Computational Experiment Results for Instance: " + instanceName + " ---\n");
-            System.out.println("Min Objective: " + stats.getMinObjective());
-            System.out.println("Max Objective: " + stats.getMaxObjective());
-            System.out.printf("Average Objective: %.2f%n", stats.getAvgObjective());
-            System.out.println("Best Solution Path: " + stats.getBestPath() + "\n");
+                // Start timing
+                long startTime = System.nanoTime();
 
-            // Save best path to CSV
-            String outputFileName = outputInstanceDirPath + "/BestSolution.csv";
-            try {
-                saveBestPathToCSV(stats.getBestPath(), outputFileName);
-                System.out.println("Best path saved to " + outputFileName + "\n");
-            } catch (IOException e) {
-                System.err.println("Error writing best path to CSV for instance '" + instanceName + "': " + e.getMessage());
+                for (int startNode = 0; startNode < n; startNode++) {
+                    Solution sol = heuristic.generateSolution(instance, k, startNode);
+                    solutions.add(sol);
+                }
+
+                // End timing
+                long endTime = System.nanoTime();
+                long duration = endTime - startTime;
+                double durationMs = duration / 1e6;
+
+                methodSolutions.get(methodName).addAll(solutions);
+                methodTimes.put(methodName, durationMs);
             }
 
+            // Compute statistics for each method and save the best path
+            System.out.println("\n--- Computational Experiment Results for Instance: " + instanceName + " ---\n");
+            for (Map.Entry<String, List<Solution>> entry : methodSolutions.entrySet()) {
+                String methodName = entry.getKey();
+                List<Solution> solutions = entry.getValue();
+                Statistics stats = Statistics.computeStatistics(solutions);
+                System.out.println("Method: " + methodName);
+                System.out.println("Min Objective: " + stats.getMinObjective());
+                System.out.println("Max Objective: " + stats.getMaxObjective());
+                System.out.printf("Average Objective: %.2f%n", stats.getAvgObjective());
+                System.out.printf("Time taken: %.2f ms%n", methodTimes.get(methodName));
+                System.out.println("Best Solution Path: " + stats.getBestPath() + "\n");
+
+                // Save best path to CSV
+                String outputFileName = outputInstanceDirPath + "/" + methodName + ".csv";
+                try {
+                    saveBestPathToCSV(stats.getBestPath(), outputFileName);
+                    System.out.println("Best path saved to " + outputFileName + "\n");
+                } catch (IOException e) {
+                    System.err.println("Error writing best path to CSV for method '" + methodName + "': " + e.getMessage());
+                }
+            }
             System.out.println("Finished processing instance: " + instanceName + "\n");
         }
 
         // After processing all instances, run the Python script
-        String pythonScript = "C:\\Users\\wazus\\OneDrive\\Desktop\\Evolutionary 3\\evolutionary\\plot_results.py"; // Adjust the path if necessary
+        String pythonScript = "Evolutionary Computation\\plots_results.py";
         System.out.println("All instances processed. Executing '" + pythonScript + "'...");
         try {
             ProcessBuilder pb = new ProcessBuilder("python", pythonScript);
@@ -519,49 +718,8 @@ public class Main {
     }
 
     /**
-     * Generates a random solution by selecting k unique nodes.
-     *
-     * @param n      Total number of nodes
-     * @param k      Number of nodes to select
-     * @param random Random instance
-     * @return A list of selected node indices
-     */
-    private static List<Integer> generateRandomSolution(int n, int k, Random random) {
-        List<Integer> allNodes = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            allNodes.add(i);
-        }
-        Collections.shuffle(allNodes, random);
-        return allNodes.subList(0, Math.min(k, allNodes.size()));
-    }
-
-    /**
-     * Computes the objective function: sum of path lengths + sum of node costs
-     *
-     * @param path           The current path
-     * @param distanceMatrix The distance matrix
-     * @param nodes          The list of nodes
-     * @return The objective value
-     */
-    private static int computeObjective(List<Integer> path, int[][] distanceMatrix, List<Node> nodes) {
-        int totalDistance = 0;
-        int k = path.size();
-        for (int i = 0; i < k; i++) {
-            int from = path.get(i);
-            int to = path.get((i + 1) % k);
-            totalDistance += distanceMatrix[from][to];
-        }
-        int totalCost = 0;
-        for (int node : path) {
-            totalCost += nodes.get(node).getCost();
-        }
-        return totalDistance + totalCost;
-    }
-
-    /**
      * Saves the best path to a CSV file, with each node index on a separate line.
      * The first node is appended at the end to complete the cycle.
-     *
      * @param bestPath List of node indices representing the best path
      * @param fileName The name of the output CSV file
      * @throws IOException If file writing fails
@@ -573,7 +731,7 @@ public class Main {
             writer.newLine();
         }
         if (!bestPath.isEmpty()) {
-            writer.write(bestPath.get(0).toString()); // Complete the cycle
+            writer.write(bestPath.getFirst().toString());
         }
         writer.close();
     }
