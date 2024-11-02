@@ -117,7 +117,7 @@ class Solution {
  * Abstract class for heuristic methods.
  */
 abstract class Heuristic {
-    protected Random random = new Random();
+    protected Random random = new Random(42);
 
     /**
      * Generates a solution based on the heuristic.
@@ -148,16 +148,6 @@ abstract class Heuristic {
         return totalDistance + totalCost;
     }
 
-    protected static class InsertionPosition {
-        int position;
-        int increase;
-
-        public InsertionPosition(int position, int increase) {
-            this.position = position;
-            this.increase = increase;
-        }
-    }
-
     protected static class InsertionInfo {
         int position;
         int bestIncrease;
@@ -168,22 +158,6 @@ abstract class Heuristic {
             this.bestIncrease = bestIncrease;
             this.secondBestIncrease = secondBestIncrease;
         }
-    }
-
-    protected InsertionPosition findBestInsertionPosition(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
-        int bestPos = -1;
-        int minIncrease = Integer.MAX_VALUE;
-        int pathSize = path.size();
-        for (int i = 0; i < pathSize; i++) {
-            int current = path.get(i);
-            int next = path.get((i + 1) % pathSize);
-            int increase = distanceMatrix[current][nodeToInsert] + distanceMatrix[nodeToInsert][next] - distanceMatrix[current][next];
-            if (increase < minIncrease) {
-                minIncrease = increase;
-                bestPos = i + 1;
-            }
-        }
-        return new InsertionPosition(bestPos, minIncrease);
     }
 
     protected InsertionInfo findBestAndSecondBestInsertion(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
@@ -224,221 +198,6 @@ class RandomSolution extends Heuristic {
         selectedNodes = selectedNodes.subList(0, Math.min(k, selectedNodes.size()));
         int objective = computeObjective(selectedNodes, instance);
         return new Solution(selectedNodes, objective);
-    }
-}
-
-/**
- * Implements the Nearest Neighbor heuristic by adding nodes to the end of the path,
- * considering the sum of Euclidean distance and node cost.
- */
-class NearestNeighborEnd extends Heuristic {
-    @Override
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
-        List<Node> nodes = instance.getNodes();
-        int n = nodes.size();
-        if (n == 0) {
-            return new Solution(new ArrayList<>(), 0);
-        }
-
-        List<Integer> path = new ArrayList<>();
-        path.add(startNode);
-        Set<Integer> selected = new HashSet<>();
-        selected.add(startNode);
-        int[][] distanceMatrix = instance.getDistanceMatrix();
-
-        while (path.size() < k) {
-            int last = path.getLast();
-            int nearest = -1;
-            int minDist = Integer.MAX_VALUE;
-
-            for (int node = 0; node < n; node++) {
-                if (!selected.contains(node)) {
-                    int dist = distanceMatrix[last][node];
-                    int effectiveDistance = dist + nodes.get(node).getCost();
-                    if (effectiveDistance < minDist) {
-                        minDist = effectiveDistance;
-                        nearest = node;
-                    }
-                }
-            }
-
-            if (nearest != -1) {
-                path.add(nearest);
-                selected.add(nearest);
-            } else {
-                break; // No more nodes to add
-            }
-        }
-
-        int objective = computeObjective(path, instance);
-        return new Solution(path, objective);
-    }
-}
-
-/**
- * Implements the Nearest Neighbor heuristic by adding nodes at any position in the path,
- * considering the sum of Euclidean distance and node cost.
- */
-class NearestNeighborAny extends Heuristic {
-    @Override
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
-        List<Node> nodes = instance.getNodes();
-        int n = nodes.size();
-        if (n == 0) {
-            return new Solution(new ArrayList<>(), 0);
-        }
-
-        List<Integer> path = new ArrayList<>();
-        path.add(startNode);
-        Set<Integer> selected = new HashSet<>();
-        selected.add(startNode);
-        int[][] distanceMatrix = instance.getDistanceMatrix();
-
-        while (path.size() < k) {
-            int nearest = -1;
-            int minDist = Integer.MAX_VALUE;
-
-            for (int node = 0; node < n; node++) {
-                if (!selected.contains(node)) {
-                    for (int p_node : path) {
-                        int dist = distanceMatrix[p_node][node];
-                        int effectiveDistance = dist + nodes.get(node).getCost();
-                        if (effectiveDistance < minDist) {
-                            minDist = effectiveDistance;
-                            nearest = node;
-                        }
-                    }
-                }
-            }
-
-            if (nearest != -1) {
-                InsertionPosition insertion = findBestInsertionPosition(path, nearest, distanceMatrix);
-                path.add(insertion.position, nearest);
-                selected.add(nearest);
-            } else {
-                break; // No more nodes to add
-            }
-        }
-
-        int objective = computeObjective(path, instance);
-        return new Solution(path, objective);
-    }
-}
-
-/**
- * Implements the Greedy Cycle heuristic.
- */
-class GreedyCycle extends Heuristic {
-    @Override
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
-        List<Node> nodes = instance.getNodes();
-        int n = nodes.size();
-        if (n == 0) {
-            return new Solution(new ArrayList<>(), 0);
-        }
-        List<Integer> path = new ArrayList<>();
-        path.add(startNode);
-        Set<Integer> selected = new HashSet<>();
-        selected.add(startNode);
-        int[][] distanceMatrix = instance.getDistanceMatrix();
-
-        while (path.size() < k) {
-            int bestNode = -1;
-            int bestScore = Integer.MAX_VALUE;
-            for (int node = 0; node < n; node++) {
-                if (!selected.contains(node)) {
-                    InsertionPosition insertion = findBestInsertionPosition(path, node, distanceMatrix);
-                    int minIncrease = insertion.increase;
-                    int score = minIncrease + nodes.get(node).getCost();
-                    if (score < bestScore) {
-                        bestScore = score;
-                        bestNode = node;
-                    }
-                }
-            }
-            if (bestNode != -1) {
-                InsertionPosition insertion = findBestInsertionPosition(path, bestNode, distanceMatrix);
-                if (insertion.position != -1) {
-                    path.add(insertion.position, bestNode);
-                    selected.add(bestNode);
-                } else {
-                    path.add(bestNode);
-                    selected.add(bestNode);
-                }
-            } else {
-                break; // No more nodes to add
-            }
-        }
-
-        int objective = computeObjective(path, instance);
-        return new Solution(path, objective);
-    }
-}
-
-/**
- * Implements the Greedy 2-Regret heuristic.
- */
-class Greedy2Regret extends Heuristic {
-
-    @Override
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
-        List<Node> nodes = instance.getNodes();
-        int n = nodes.size();
-        if (n == 0) {
-            return new Solution(new ArrayList<>(), 0);
-        }
-        List<Integer> path = new ArrayList<>();
-        path.add(startNode);
-        Set<Integer> selected = new HashSet<>();
-        selected.add(startNode);
-        int[][] distanceMatrix = instance.getDistanceMatrix();
-
-        while (path.size() < k) {
-            int maxRegretNode = -1;
-            int maxRegretValue = Integer.MIN_VALUE;
-            int bestInsertionPosition = -1;
-
-            for (int node = 0; node < n; node++) {
-                if (selected.contains(node)) {
-                    continue;
-                }
-                int bestIncrease = Integer.MAX_VALUE;
-                int secondBestIncrease = Integer.MAX_VALUE;
-                int bestPos = -1;
-
-                // Evaluate all possible insertion positions
-                for (int i = 0; i < path.size(); i++) {
-                    int current = path.get(i);
-                    int next = path.get((i + 1) % path.size());
-                    int increase = distanceMatrix[current][node] + distanceMatrix[node][next] - distanceMatrix[current][next] + nodes.get(node).getCost();
-
-                    if (increase < bestIncrease) {
-                        secondBestIncrease = bestIncrease;
-                        bestIncrease = increase;
-                        bestPos = i + 1;
-                    } else if (increase < secondBestIncrease) {
-                        secondBestIncrease = increase;
-                    }
-                }
-
-                int regretValue = secondBestIncrease - bestIncrease;
-                if (regretValue > maxRegretValue) {
-                    maxRegretValue = regretValue;
-                    maxRegretNode = node;
-                    bestInsertionPosition = bestPos;
-                }
-            }
-
-            if (maxRegretNode != -1 && bestInsertionPosition != -1) {
-                path.add(bestInsertionPosition, maxRegretNode);
-                selected.add(maxRegretNode);
-            } else {
-                break; // No more nodes to add
-            }
-        }
-
-        int objective = computeObjective(path, instance);
-        return new Solution(path, objective);
     }
 }
 
@@ -503,6 +262,248 @@ class GreedyWeightedRegret extends Heuristic {
 
         int objective = computeObjective(path, instance);
         return new Solution(path, objective);
+    }
+}
+
+/**
+ * Implements Local Search algorithms with specified options.
+ */
+class LocalSearch extends Heuristic {
+    enum LocalSearchType { STEEPEST, GREEDY }
+
+    enum IntraRouteMoveType { TWO_NODES_EXCHANGE, TWO_EDGES_EXCHANGE }
+
+    enum MoveType { INTRA_ROUTE, INTER_ROUTE }
+
+    private static class Move {
+        MoveType moveType;
+        int i, j; // Positions in path for intra-route moves
+        int u; // Unselected node for inter-route moves
+        IntraRouteMoveType intraRouteMoveType;
+
+        public Move(MoveType moveType, int i, int j, IntraRouteMoveType intraRouteMoveType) {
+            this.moveType = moveType;
+            this.i = i;
+            this.j = j;
+            this.intraRouteMoveType = intraRouteMoveType;
+        }
+
+        public Move(MoveType moveType, int i, int u) {
+            this.moveType = moveType;
+            this.i = i;
+            this.u = u;
+        }
+    }
+
+    /**
+     * Performs local search on the given initial solution.
+     * @param initialSolution The starting solution
+     * @param instance The problem instance
+     * @param localSearchType Type of local search (STEEPEST or GREEDY)
+     * @param intraRouteMoveType Type of intra-route moves
+     * @param isGreedy Whether the neighborhood should be browsed in random order
+     * @return An improved Solution object
+     */
+    public Solution performLocalSearch(
+            Solution initialSolution,
+            ProblemInstance instance,
+            LocalSearchType localSearchType,
+            IntraRouteMoveType intraRouteMoveType,
+            boolean isGreedy
+    ) {
+        List<Integer> path = new ArrayList<>(initialSolution.getPath());
+        Set<Integer> selectedNodes = new HashSet<>(path);
+        int n = instance.getNodes().size();
+        int[][] distanceMatrix = instance.getDistanceMatrix();
+        List<Node> nodes = instance.getNodes();
+
+        boolean improvement = true;
+        while (improvement) {
+            improvement = false;
+            Move bestMove = null;
+            int bestDelta = 0;
+
+            List<Move> moves = generateMoves(path, selectedNodes, n, intraRouteMoveType);
+
+            if (isGreedy) {
+                Collections.shuffle(moves, random);
+            }
+
+            for (Move move : moves) {
+                int delta = computeDelta(move, path, selectedNodes, distanceMatrix, nodes);
+
+                if (delta < 0) {
+                    if (localSearchType == LocalSearchType.GREEDY) {
+                        // Apply the move
+                        applyMove(move, path, selectedNodes);
+                        improvement = true;
+                        break;
+                    } else if (localSearchType == LocalSearchType.STEEPEST) {
+                        if (delta < bestDelta) {
+                            bestDelta = delta;
+                            bestMove = move;
+                        }
+                    }
+                }
+            }
+
+            if (!improvement && localSearchType == LocalSearchType.STEEPEST && bestMove != null) {
+                // Apply the best move
+                applyMove(bestMove, path, selectedNodes);
+                improvement = true;
+            }
+        }
+
+        // Recompute objective value
+        int newObjective = computeObjective(path, instance);
+        return new Solution(path, newObjective);
+    }
+
+    private List<Move> generateMoves(List<Integer> path, Set<Integer> selectedNodes, int n, IntraRouteMoveType intraRouteMoveType) {
+        List<Move> moves = new ArrayList<>();
+
+        // Generate intra-route moves
+        int pathSize = path.size();
+        for (int i = 0; i < pathSize - 1; i++) {
+            for (int j = i + 1; j < pathSize; j++) {
+                if (intraRouteMoveType == IntraRouteMoveType.TWO_EDGES_EXCHANGE && (i == j || (i + 1) % pathSize == j || i == (j + 1) % pathSize)) {
+                    continue; // Skip adjacent nodes for two-edges exchange
+                }
+                moves.add(new Move(MoveType.INTRA_ROUTE, i, j, intraRouteMoveType));
+            }
+        }
+
+        // Generate inter-route moves
+        for (int i = 0; i < pathSize; i++) {
+            for (int u = 0; u < n; u++) {
+                if (!selectedNodes.contains(u)) {
+                    moves.add(new Move(MoveType.INTER_ROUTE, i, u));
+                }
+            }
+        }
+
+        return moves;
+    }
+
+    private int computeDelta(Move move, List<Integer> path, Set<Integer> selectedNodes, int[][] distanceMatrix, List<Node> nodes) {
+        int delta = 0;
+        if (move.moveType == MoveType.INTRA_ROUTE) {
+            if (move.intraRouteMoveType == IntraRouteMoveType.TWO_NODES_EXCHANGE) {
+                delta = computeDeltaTwoNodesExchange(move.i, move.j, path, distanceMatrix);
+            } else if (move.intraRouteMoveType == IntraRouteMoveType.TWO_EDGES_EXCHANGE) {
+                delta = computeDeltaTwoEdgesExchange(move.i, move.j, path, distanceMatrix);
+            }
+        } else if (move.moveType == MoveType.INTER_ROUTE) {
+            delta = computeDeltaInterRouteExchange(move.i, move.u, path, selectedNodes, distanceMatrix, nodes);
+        }
+        return delta;
+    }
+
+    private int computeDeltaTwoNodesExchange(int i, int j, List<Integer> path, int[][] distanceMatrix) {
+        int n = path.size();
+
+        int node_i_prev = path.get((i - 1 + n) % n);
+        int node_i = path.get(i);
+        int node_i_next = path.get((i + 1) % n);
+
+        int node_j_prev = path.get((j - 1 + n) % n);
+        int node_j = path.get(j);
+        int node_j_next = path.get((j + 1) % n);
+
+        int delta;
+
+        if ((i + 1) % n == j) { // i and j are adjacent, i before j
+            int distBefore = distanceMatrix[node_i_prev][node_i] + distanceMatrix[node_i][node_j] + distanceMatrix[node_j][node_j_next];
+            int distAfter = distanceMatrix[node_i_prev][node_j] + distanceMatrix[node_j][node_i] + distanceMatrix[node_i][node_j_next];
+
+            delta = distAfter - distBefore;
+        } else if ((j + 1) % n == i) { // j and i are adjacent, j before i
+            int distBefore = distanceMatrix[node_j_prev][node_j] + distanceMatrix[node_j][node_i] + distanceMatrix[node_i][node_i_next];
+            int distAfter = distanceMatrix[node_j_prev][node_i] + distanceMatrix[node_i][node_j] + distanceMatrix[node_j][node_i_next];
+
+            delta = distAfter - distBefore;
+        } else {
+            int distBefore = distanceMatrix[node_i_prev][node_i] + distanceMatrix[node_i][node_i_next]
+                    + distanceMatrix[node_j_prev][node_j] + distanceMatrix[node_j][node_j_next];
+
+            int distAfter = distanceMatrix[node_i_prev][node_j] + distanceMatrix[node_j][node_i_next]
+                    + distanceMatrix[node_j_prev][node_i] + distanceMatrix[node_i][node_j_next];
+
+            delta = distAfter - distBefore;
+        }
+
+        return delta;
+    }
+
+    private int computeDeltaTwoEdgesExchange(int i, int j, List<Integer> path, int[][] distanceMatrix) {
+        int n = path.size();
+        if (i == j || (i + 1) % n == j || i == (j + 1) % n) {
+            // No change for adjacent nodes
+            return 0;
+        }
+
+        int i1 = Math.min(i, j);
+        int j1 = Math.max(i, j);
+
+        int node_i_prev = path.get((i1 - 1 + n) % n);
+        int node_i = path.get(i1);
+        int node_j = path.get(j1);
+        int node_j_next = path.get((j1 + 1) % n);
+
+        int delta = 0;
+
+        // Edges being removed
+        delta -= distanceMatrix[node_i_prev][node_i];
+        delta -= distanceMatrix[node_j][node_j_next];
+
+        // Edges being added
+        delta += distanceMatrix[node_i_prev][node_j];
+        delta += distanceMatrix[node_i][node_j_next];
+
+        return delta;
+    }
+
+    private int computeDeltaInterRouteExchange(int i, int u, List<Integer> path, Set<Integer> selectedNodes, int[][] distanceMatrix, List<Node> nodes) {
+        int n = path.size();
+        int node_i_prev = path.get((i - 1 + n) % n);
+        int node_i = path.get(i);
+        int node_i_next = path.get((i + 1) % n);
+
+        int delta_distance = distanceMatrix[node_i_prev][u] + distanceMatrix[u][node_i_next]
+                - distanceMatrix[node_i_prev][node_i] - distanceMatrix[node_i][node_i_next];
+
+        int delta_cost = nodes.get(u).getCost() - nodes.get(node_i).getCost();
+
+        int delta = delta_distance + delta_cost;
+
+        return delta;
+    }
+
+    private void applyMove(Move move, List<Integer> path, Set<Integer> selectedNodes) {
+        if (move.moveType == MoveType.INTRA_ROUTE) {
+            if (move.intraRouteMoveType == IntraRouteMoveType.TWO_NODES_EXCHANGE) {
+                Collections.swap(path, move.i, move.j);
+            } else if (move.intraRouteMoveType == IntraRouteMoveType.TWO_EDGES_EXCHANGE) {
+                int i = Math.min(move.i, move.j);
+                int j = Math.max(move.i, move.j);
+                while (i < j) {
+                    Collections.swap(path, i, j);
+                    i++;
+                    j--;
+                }
+            }
+        } else if (move.moveType == MoveType.INTER_ROUTE) {
+            int oldNode = path.get(move.i);
+            path.set(move.i, move.u);
+            selectedNodes.remove(oldNode);
+            selectedNodes.add(move.u);
+        }
+    }
+
+    @Override
+    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+        // This method is not used for LocalSearch; implementations are in performLocalSearch
+        return null;
     }
 }
 
@@ -595,13 +596,14 @@ public class Main {
         }
 
         // Initialize heuristics
-        List<Heuristic> heuristics = new ArrayList<>();
-        heuristics.add(new RandomSolution());
-        heuristics.add(new NearestNeighborEnd());
-        heuristics.add(new NearestNeighborAny());
-        heuristics.add(new GreedyCycle());
-        heuristics.add(new Greedy2Regret());
-        heuristics.add(new GreedyWeightedRegret());
+        Heuristic randomHeuristic = new RandomSolution();
+        Heuristic greedyHeuristic = new GreedyWeightedRegret();
+        LocalSearch localSearch = new LocalSearch();
+
+        // Define combinations of options
+        LocalSearch.LocalSearchType[] searchTypes = {LocalSearch.LocalSearchType.STEEPEST, LocalSearch.LocalSearchType.GREEDY};
+        LocalSearch.IntraRouteMoveType[] moveTypes = {LocalSearch.IntraRouteMoveType.TWO_NODES_EXCHANGE, LocalSearch.IntraRouteMoveType.TWO_EDGES_EXCHANGE};
+        boolean[] startingSolutions = {true, false}; // true for random, false for greedy
 
         // Iterate over each input file
         for (File inputFile : inputFiles) {
@@ -646,32 +648,47 @@ public class Main {
             // Initialize a map to store solutions per method
             Map<String, List<Solution>> methodSolutions = new LinkedHashMap<>();
             Map<String, Double> methodTimes = new LinkedHashMap<>();
-            for (Heuristic heuristic : heuristics) {
-                String methodName = heuristic.getClass().getSimpleName();
-                methodSolutions.put(methodName, new ArrayList<>());
-            }
 
-            // Generate solutions for each heuristic and each start node
-            for (Heuristic heuristic : heuristics) {
-                String methodName = heuristic.getClass().getSimpleName();
-                System.out.println("Generating solutions using " + methodName + "...");
-                List<Solution> solutions = new ArrayList<>();
+            // Generate combinations
+            for (LocalSearch.LocalSearchType searchType : searchTypes) {
+                for (LocalSearch.IntraRouteMoveType moveType : moveTypes) {
+                    for (boolean isRandomStart : startingSolutions) {
+                        String methodName = searchType + "_" + moveType + "_" + (isRandomStart ? "RandomStart" : "GreedyStart");
+                        methodSolutions.put(methodName, new ArrayList<>());
 
-                // Start timing
-                long startTime = System.nanoTime();
+                        System.out.println("Running method: " + methodName);
+                        List<Solution> solutions = new ArrayList<>();
 
-                for (int startNode = 0; startNode < n; startNode++) {
-                    Solution sol = heuristic.generateSolution(instance, k, startNode);
-                    solutions.add(sol);
+                        // Start timing
+                        long startTime = System.nanoTime();
+
+                        if (isRandomStart) {
+                            // Use 200 random starting solutions
+                            for (int run = 0; run < 200; run++) {
+                                Solution initialSolution = randomHeuristic.generateSolution(instance, k, -1);
+                                Solution improvedSolution = localSearch.performLocalSearch(
+                                        initialSolution, instance, searchType, moveType, searchType == LocalSearch.LocalSearchType.GREEDY);
+                                solutions.add(improvedSolution);
+                            }
+                        } else {
+                            // Use each node as starting node for greedy heuristic
+                            for (int startNode = 0; startNode < n && startNode < 200; startNode++) {
+                                Solution initialSolution = greedyHeuristic.generateSolution(instance, k, startNode);
+                                Solution improvedSolution = localSearch.performLocalSearch(
+                                        initialSolution, instance, searchType, moveType, searchType == LocalSearch.LocalSearchType.GREEDY);
+                                solutions.add(improvedSolution);
+                            }
+                        }
+
+                        // End timing
+                        long endTime = System.nanoTime();
+                        long duration = endTime - startTime;
+                        double durationMs = duration / 1e6;
+
+                        methodSolutions.get(methodName).addAll(solutions);
+                        methodTimes.put(methodName, durationMs);
+                    }
                 }
-
-                // End timing
-                long endTime = System.nanoTime();
-                long duration = endTime - startTime;
-                double durationMs = duration / 1e6;
-
-                methodSolutions.get(methodName).addAll(solutions);
-                methodTimes.put(methodName, durationMs);
             }
 
             // Compute statistics for each method and save the best path
@@ -697,23 +714,6 @@ public class Main {
                 }
             }
             System.out.println("Finished processing instance: " + instanceName + "\n");
-        }
-
-        // After processing all instances, run the Python script
-        String pythonScript = "Evolutionary Computation\\plots_results.py";
-        System.out.println("All instances processed. Executing '" + pythonScript + "'...");
-        try {
-            ProcessBuilder pb = new ProcessBuilder("python", pythonScript);
-            pb.inheritIO(); // Redirect output and error streams to the console
-            Process process = pb.start();
-            int exitCode = process.waitFor();
-            if (exitCode == 0) {
-                System.out.println("'" + pythonScript + "' executed successfully.");
-            } else {
-                System.err.println("'" + pythonScript + "' exited with code: " + exitCode);
-            }
-        } catch (Exception e) {
-            System.err.println("Error executing '" + pythonScript + "': " + e.getMessage());
         }
     }
 
