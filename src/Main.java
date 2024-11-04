@@ -237,7 +237,7 @@ class SteepestLocalSearchWithCandidates extends Heuristic {
                     }
 
                     // Compute delta objective for 2-opt move between u and v
-                    int delta = compute2OptDelta(currentPath, i, j, distanceMatrix, nodes);
+                    int delta = compute2OptDelta(currentPath, i, j, distanceMatrix, nodes, candidateNeighbors);
 
                     if (delta < bestDelta) {
                         bestDelta = delta;
@@ -296,7 +296,7 @@ class SteepestLocalSearchWithCandidates extends Heuristic {
         return new Solution(currentPath, objective);
     }
 
-    private int compute2OptDelta(List<Integer> path, int i, int j, int[][] distanceMatrix, List<Node> nodes) {
+    private int compute2OptDelta(List<Integer> path, int i, int j, int[][] distanceMatrix, List<Node> nodes, Map<Integer, List<Integer>> candidateNeighbors) {
         int n = path.size();
         int a = path.get(i);
         int b = path.get((i + 1) % n);
@@ -304,7 +304,13 @@ class SteepestLocalSearchWithCandidates extends Heuristic {
         int d = path.get((j + 1) % n);
 
         int delta = -distanceMatrix[a][b] - distanceMatrix[c][d] + distanceMatrix[a][c] + distanceMatrix[b][d];
-        // Node costs remain the same
+
+        // Check if at least one of the new edges is a candidate edge
+        boolean candidateEdgeIntroduced = candidateNeighbors.get(a).contains(c) || candidateNeighbors.get(b).contains(d);
+        if (!candidateEdgeIntroduced) {
+            return Integer.MAX_VALUE; // Invalid move
+        }
+
         return delta;
     }
 
