@@ -5,26 +5,14 @@ import java.util.*;
  * Represents a node with x and y coordinates and a cost.
  */
 class Node {
-    private final int x;
-    private final int y;
-    private final int cost;
+    final int x;
+    final int y;
+    final int cost;
 
-    public Node(int x, int y, int cost) {
+    Node(int x, int y, int cost) {
         this.x = x;
         this.y = y;
         this.cost = cost;
-    }
-
-    public int getX() {
-        return x;
-    }
-
-    public int getY() {
-        return y;
-    }
-
-    public int getCost() {
-        return cost;
     }
 }
 
@@ -32,10 +20,10 @@ class Node {
  * Represents a problem instance with nodes and a distance matrix.
  */
 class ProblemInstance {
-    private final Node[] nodes;
-    private int[][] distanceMatrix;
+    final Node[] nodes;
+    int[][] distanceMatrix;
 
-    public ProblemInstance(List<Node> nodeList) {
+    ProblemInstance(List<Node> nodeList) {
         nodes = nodeList.toArray(new Node[0]);
     }
 
@@ -45,7 +33,7 @@ class ProblemInstance {
      * @return A ProblemInstance object
      * @throws IOException If file reading fails
      */
-    public static ProblemInstance readCSV(String filePath) throws IOException {
+    static ProblemInstance readCSV(String filePath) throws IOException {
         List<Node> nodeList = new ArrayList<>();
         BufferedReader reader = new BufferedReader(new FileReader(filePath));
         String line;
@@ -70,28 +58,21 @@ class ProblemInstance {
     /**
      * Computes the Euclidean distance matrix between nodes, rounded to the nearest integer.
      */
-    public void computeDistanceMatrix() {
+    void computeDistanceMatrix() {
         int n = nodes.length;
         distanceMatrix = new int[n][n];
+        Node nodeI, nodeJ;
         for (int i = 0; i < n; i++) {
-            Node nodeI = nodes[i];
+            nodeI = nodes[i];
             for (int j = i + 1; j < n; j++) {
-                Node nodeJ = nodes[j];
-                double dist = Math.sqrt(Math.pow(nodeI.getX() - nodeJ.getX(), 2) +
-                        Math.pow(nodeI.getY() - nodeJ.getY(), 2));
-                int roundedDist = (int) Math.round(dist);
+                nodeJ = nodes[j];
+                double dx = nodeI.x - nodeJ.x;
+                double dy = nodeI.y - nodeJ.y;
+                int roundedDist = (int) Math.round(Math.sqrt(dx * dx + dy * dy));
                 distanceMatrix[i][j] = roundedDist;
                 distanceMatrix[j][i] = roundedDist;
             }
         }
-    }
-
-    public Node[] getNodes() {
-        return nodes;
-    }
-
-    public int[][] getDistanceMatrix() {
-        return distanceMatrix;
     }
 }
 
@@ -99,20 +80,12 @@ class ProblemInstance {
  * Represents a solution with a path and its objective value.
  */
 class Solution {
-    private final int[] path;
-    private final int objectiveValue;
+    final int[] path;
+    final int objectiveValue;
 
-    public Solution(int[] path, int objectiveValue) {
+    Solution(int[] path, int objectiveValue) {
         this.path = Arrays.copyOf(path, path.length);
         this.objectiveValue = objectiveValue;
-    }
-
-    public int[] getPath() {
-        return path;
-    }
-
-    public int getObjectiveValue() {
-        return objectiveValue;
     }
 }
 
@@ -120,7 +93,7 @@ class Solution {
  * Abstract class for heuristic methods.
  */
 abstract class Heuristic {
-    protected Random random = new Random(42);
+    final Random random = new Random(42);
 
     /**
      * Generates a solution based on the heuristic.
@@ -134,32 +107,33 @@ abstract class Heuristic {
     /**
      * Computes the objective function: sum of path lengths + sum of node costs
      */
-    protected int computeObjective(int[] path, ProblemInstance instance) {
+    int computeObjective(int[] path, ProblemInstance instance) {
         int totalDistance = 0;
         int k = path.length;
-        int[][] distanceMatrix = instance.getDistanceMatrix();
-        Node[] nodes = instance.getNodes();
+        int[][] distanceMatrix = instance.distanceMatrix;
+        Node[] nodes = instance.nodes;
+        int from, to;
         for (int i = 0; i < k; i++) {
-            int from = path[i];
-            int to = path[(i + 1) % k];
+            from = path[i];
+            to = path[(i + 1) % k];
             totalDistance += distanceMatrix[from][to];
         }
         int totalCost = 0;
         for (int node : path) {
-            totalCost += nodes[node].getCost();
+            totalCost += nodes[node].cost;
         }
         return totalDistance + totalCost;
     }
 }
 
 /**
- * Implements the Steepest Local Search with Move Evaluation.
+ * Implements the Steepest Local Search with Move Evaluation and Edge Validity Checks.
  */
 class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
 
     @Override
     public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
-        Node[] nodes = instance.getNodes();
+        Node[] nodes = instance.nodes;
         int n = nodes.length;
         int[] allNodes = new int[n];
         for (int i = 0; i < n; i++) {
@@ -170,7 +144,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
         int[] currentPath = Arrays.copyOfRange(allNodes, 0, k);
         shuffleArray(currentPath);
 
-        int[][] distanceMatrix = instance.getDistanceMatrix();
+        int[][] distanceMatrix = instance.distanceMatrix;
         boolean[] inPathSet = new boolean[n];
         for (int node : currentPath) {
             inPathSet[node] = true;
@@ -181,26 +155,31 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
 
         while (improvement) {
             improvement = false;
-            List<Move> newImprovingMoves = new ArrayList<>();
 
             // Try improving moves from previous iterations
-            for (Move move : improvingMoves) {
-                if (!move.isValid(currentPath, inPathSet, n)) {
+            Iterator<Move> iterator = improvingMoves.iterator();
+            while (iterator.hasNext()) {
+                Move move = iterator.next();
+                if (!move.isValid(currentPath, inPathSet)) {
+                    // Situation 1: Edges no longer exist; remove move from improvingMoves
+                    iterator.remove();
                     continue;
                 }
 
                 int delta = move.computeDelta(currentPath, distanceMatrix, nodes);
                 if (delta < 0) {
-                    // Apply move
+                    // Situation 3: Edges exist in the same orientation; apply move and remove from improvingMoves
                     move.apply(currentPath, inPathSet);
                     improvement = true;
-                    newImprovingMoves.add(move);
+                    iterator.remove();
                     break; // Apply one move at a time
+                } else {
+                    // Situation 2: Edges exist but do not lead to improvement; keep move in improvingMoves
+                    continue;
                 }
             }
 
             if (improvement) {
-                improvingMoves = newImprovingMoves;
                 continue;
             }
 
@@ -208,35 +187,54 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
             int bestDelta = 0;
             Move bestMove = null;
 
+            int nPath = currentPath.length;
             // Intra-route moves (2-opt)
-            for (int i = 0; i < currentPath.length; i++) {
-                for (int j = i + 2; j < currentPath.length; j++) {
-                    if (i == 0 && j == currentPath.length - 1) {
+            for (int i = 0; i < nPath; i++) {
+                int a = currentPath[i];
+                int b = currentPath[(i + 1) % nPath];
+                for (int j = i + 2; j < nPath; j++) {
+                    if (i == 0 && j == nPath - 1) {
                         continue; // Do not reverse the entire tour
                     }
 
-                    int delta = compute2OptDelta(currentPath, i, j, distanceMatrix);
+                    int c = currentPath[j];
+                    int d = currentPath[(j + 1) % nPath];
+
+                    int delta = -distanceMatrix[a][b] - distanceMatrix[c][d]
+                            + distanceMatrix[a][c] + distanceMatrix[b][d];
 
                     if (delta < bestDelta) {
                         bestDelta = delta;
-                        bestMove = new Move(i, j, MoveType.INTRA_ROUTE);
+                        bestMove = new Move();
+                        bestMove.setIntraRouteMove(i, j, a, b, c, d);
                     }
                 }
             }
 
             // Inter-route moves (Swap selected with unselected node)
-            for (int i = 0; i < currentPath.length; i++) {
+            for (int i = 0; i < nPath; i++) {
+                int u = currentPath[i];
+                int prev = currentPath[(i - 1 + nPath) % nPath];
+                int next = currentPath[(i + 1) % nPath];
+
+                int distPrevU = distanceMatrix[prev][u];
+                int distUNext = distanceMatrix[u][next];
 
                 for (int v = 0; v < n; v++) {
                     if (inPathSet[v]) {
                         continue; // v is already in the path
                     }
 
-                    int delta = computeSwapDelta(currentPath, i, v, distanceMatrix, nodes);
+                    int distPrevV = distanceMatrix[prev][v];
+                    int distVNext = distanceMatrix[v][next];
+
+                    int delta = -distPrevU - distUNext + distPrevV + distVNext
+                            - nodes[u].cost + nodes[v].cost;
 
                     if (delta < bestDelta) {
                         bestDelta = delta;
-                        bestMove = new Move(i, v, MoveType.INTER_ROUTE);
+                        bestMove = new Move();
+                        bestMove.setInterRouteMove(i, v, u);
                     }
                 }
             }
@@ -246,7 +244,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
                 bestMove.apply(currentPath, inPathSet);
                 improvement = true;
                 improvingMoves.clear();
-                improvingMoves.add(bestMove);
+                improvingMoves.add(new Move(bestMove)); // Save the move for future iterations
             }
         }
 
@@ -255,37 +253,13 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
     }
 
     private void shuffleArray(int[] array) {
+        int index, temp;
         for (int i = array.length - 1; i > 0; i--) {
-            int index = random.nextInt(i + 1);
-            // Simple swap
-            int temp = array[index];
+            index = random.nextInt(i + 1);
+            temp = array[index];
             array[index] = array[i];
             array[i] = temp;
         }
-    }
-
-    private int compute2OptDelta(int[] path, int i, int j, int[][] distanceMatrix) {
-        int n = path.length;
-        int a = path[i];
-        int b = path[(i + 1) % n];
-        int c = path[j];
-        int d = path[(j + 1) % n];
-
-        int delta = -distanceMatrix[a][b] - distanceMatrix[c][d] + distanceMatrix[a][c] + distanceMatrix[b][d];
-        return delta;
-    }
-
-    private int computeSwapDelta(int[] path, int i, int v, int[][] distanceMatrix, Node[] nodes) {
-        int n = path.length;
-        int u = path[i];
-        int prev = path[(i - 1 + n) % n];
-        int next = path[(i + 1) % n];
-
-        int delta = -distanceMatrix[prev][u] - distanceMatrix[u][next] + distanceMatrix[prev][v] + distanceMatrix[v][next];
-        delta -= nodes[u].getCost();
-        delta += nodes[v].getCost();
-
-        return delta;
     }
 
     private static class Move {
@@ -293,31 +267,83 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
         int index2;
         MoveType type;
 
-        public Move(int index1, int index2, MoveType type) {
-            this.index1 = index1;
-            this.index2 = index2;
-            this.type = type;
+        // For intra-route moves
+        int nodeA, nodeB, nodeC, nodeD;
+
+        // For inter-route moves
+        int nodeU; // Original node at index1 when the move was created
+
+        Move() {
         }
 
-        public boolean isValid(int[] path, boolean[] inPathSet, int n) {
+        Move(Move other) {
+            this.index1 = other.index1;
+            this.index2 = other.index2;
+            this.type = other.type;
+            this.nodeA = other.nodeA;
+            this.nodeB = other.nodeB;
+            this.nodeC = other.nodeC;
+            this.nodeD = other.nodeD;
+            this.nodeU = other.nodeU;
+        }
+
+        void setIntraRouteMove(int index1, int index2, int nodeA, int nodeB, int nodeC, int nodeD) {
+            this.index1 = index1;
+            this.index2 = index2;
+            this.type = MoveType.INTRA_ROUTE;
+            this.nodeA = nodeA;
+            this.nodeB = nodeB;
+            this.nodeC = nodeC;
+            this.nodeD = nodeD;
+        }
+
+        void setInterRouteMove(int index1, int index2, int nodeU) {
+            this.index1 = index1;
+            this.index2 = index2;
+            this.type = MoveType.INTER_ROUTE;
+            this.nodeU = nodeU;
+        }
+
+        boolean isValid(int[] path, boolean[] inPathSet) {
             if (type == MoveType.INTRA_ROUTE) {
-                return index1 >= 0 && index1 < path.length && index2 >= 0 && index2 < path.length;
+                int nPath = path.length;
+                // Check if the nodes involved are still the same
+                return path[index1] == nodeA && path[(index1 + 1) % nPath] == nodeB &&
+                        path[index2] == nodeC && path[(index2 + 1) % nPath] == nodeD;
             } else if (type == MoveType.INTER_ROUTE) {
-                return index1 >= 0 && index1 < path.length && !inPathSet[index2] && index2 >= 0 && index2 < n;
+                // Check if the node at index1 is still nodeU and index2 is not in the path
+                return path[index1] == nodeU && !inPathSet[index2];
             }
             return false;
         }
 
-        public int computeDelta(int[] path, int[][] distanceMatrix, Node[] nodes) {
+        int computeDelta(int[] path, int[][] distanceMatrix, Node[] nodes) {
             if (type == MoveType.INTRA_ROUTE) {
-                return compute2OptDelta(path, index1, index2, distanceMatrix);
+                int n = path.length;
+                int a = path[index1];
+                int b = path[(index1 + 1) % n];
+                int c = path[index2];
+                int d = path[(index2 + 1) % n];
+
+                int delta = -distanceMatrix[a][b] - distanceMatrix[c][d]
+                        + distanceMatrix[a][c] + distanceMatrix[b][d];
+                return delta;
             } else if (type == MoveType.INTER_ROUTE) {
-                return computeSwapDelta(path, index1, index2, distanceMatrix, nodes);
+                int n = path.length;
+                int u = path[index1];
+                int v = index2;
+                int prev = path[(index1 - 1 + n) % n];
+                int next = path[(index1 + 1) % n];
+
+                int delta = -distanceMatrix[prev][u] - distanceMatrix[u][next]
+                        + distanceMatrix[prev][v] + distanceMatrix[v][next]
+                        - nodes[u].cost + nodes[v].cost;
+                return delta;
             }
             return Integer.MAX_VALUE;
         }
 
-        public void apply(int[] path, boolean[] inPathSet) {
+        void apply(int[] path, boolean[] inPathSet) {
             if (type == MoveType.INTRA_ROUTE) {
                 int i = index1;
                 int j = index2;
@@ -339,37 +365,14 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
         }
 
         private void reverseSubarray(int[] array, int start, int end) {
+            int temp;
             while (start < end) {
-                int temp = array[start];
+                temp = array[start];
                 array[start] = array[end];
                 array[end] = temp;
                 start++;
                 end--;
             }
-        }
-
-        private int compute2OptDelta(int[] path, int i, int j, int[][] distanceMatrix) {
-            int n = path.length;
-            int a = path[i];
-            int b = path[(i + 1) % n];
-            int c = path[j];
-            int d = path[(j + 1) % n];
-
-            int delta = -distanceMatrix[a][b] - distanceMatrix[c][d] + distanceMatrix[a][c] + distanceMatrix[b][d];
-            return delta;
-        }
-
-        private int computeSwapDelta(int[] path, int i, int v, int[][] distanceMatrix, Node[] nodes) {
-            int n = path.length;
-            int u = path[i];
-            int prev = path[(i - 1 + n) % n];
-            int next = path[(i + 1) % n];
-
-            int delta = -distanceMatrix[prev][u] - distanceMatrix[u][next] + distanceMatrix[prev][v] + distanceMatrix[v][next];
-            delta -= nodes[u].getCost();
-            delta += nodes[v].getCost();
-
-            return delta;
         }
     }
 
@@ -383,32 +386,16 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
  * Utility class to compute statistics for a list of solutions.
  */
 class Statistics {
-    private final int minObjective;
-    private final int maxObjective;
-    private final double avgObjective;
-    private final int[] bestPath;
+    final int minObjective;
+    final int maxObjective;
+    final double avgObjective;
+    final int[] bestPath;
 
-    public Statistics(int minObjective, int maxObjective, double avgObjective, int[] bestPath) {
+    Statistics(int minObjective, int maxObjective, double avgObjective, int[] bestPath) {
         this.minObjective = minObjective;
         this.maxObjective = maxObjective;
         this.avgObjective = avgObjective;
         this.bestPath = bestPath;
-    }
-
-    public int getMinObjective() {
-        return minObjective;
-    }
-
-    public int getMaxObjective() {
-        return maxObjective;
-    }
-
-    public double getAvgObjective() {
-        return avgObjective;
-    }
-
-    public int[] getBestPath() {
-        return bestPath;
     }
 
     /**
@@ -416,7 +403,7 @@ class Statistics {
      * @param solutions List of Solution objects
      * @return A Statistics object
      */
-    public static Statistics computeStatistics(List<Solution> solutions) {
+    static Statistics computeStatistics(List<Solution> solutions) {
         if (solutions == null || solutions.isEmpty()) {
             return new Statistics(0, 0, 0.0, new int[0]);
         }
@@ -425,10 +412,10 @@ class Statistics {
         long sum = 0;
         int[] bestPath = new int[0];
         for (Solution sol : solutions) {
-            int obj = sol.getObjectiveValue();
+            int obj = sol.objectiveValue;
             if (obj < min) {
                 min = obj;
-                bestPath = sol.getPath();
+                bestPath = sol.path;
             }
             if (obj > max) {
                 max = obj;
@@ -493,7 +480,7 @@ public class Main {
                 continue; // Proceed to the next file
             }
 
-            int n = instance.getNodes().length;
+            int n = instance.nodes.length;
             if (n == 0) {
                 System.out.println("No valid nodes found in the CSV file '" + fileName + "'. Skipping.");
                 continue;
@@ -550,16 +537,16 @@ public class Main {
                 List<Solution> solutions = entry.getValue();
                 Statistics stats = Statistics.computeStatistics(solutions);
                 System.out.println("Method: " + methodName);
-                System.out.println("Min Objective: " + stats.getMinObjective());
-                System.out.println("Max Objective: " + stats.getMaxObjective());
-                System.out.printf("Average Objective: %.2f%n", stats.getAvgObjective());
+                System.out.println("Min Objective: " + stats.minObjective);
+                System.out.println("Max Objective: " + stats.maxObjective);
+                System.out.printf("Average Objective: %.2f%n", stats.avgObjective);
                 System.out.printf("Time taken: %.2f ms%n", methodTimes.get(methodName));
-                System.out.println("Best Solution Path: " + Arrays.toString(stats.getBestPath()) + "\n");
+                System.out.println("Best Solution Path: " + Arrays.toString(stats.bestPath) + "\n");
 
                 // Save best path to CSV
                 String outputFileName = outputInstanceDirPath + "/" + methodName + ".csv";
                 try {
-                    saveBestPathToCSV(stats.getBestPath(), outputFileName);
+                    saveBestPathToCSV(stats.bestPath, outputFileName);
                     System.out.println("Best path saved to " + outputFileName + "\n");
                 } catch (IOException e) {
                     System.err.println("Error writing best path to CSV for method '" + methodName + "': " + e.getMessage());
