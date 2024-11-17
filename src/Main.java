@@ -93,7 +93,7 @@ class Solution {
  * Abstract class for heuristic methods.
  */
 abstract class Heuristic {
-    final Random random = new Random(42);
+    final Random random = new Random(90909090);
 
     /**
      * Generates a solution based on the heuristic.
