@@ -93,7 +93,7 @@ class Solution {
  * Abstract class for heuristic methods.
  */
 abstract class Heuristic {
-    final Random random = new Random(12345678);
+    final Random random = new Random();
 
     /**
      * Generates a solution based on the heuristic.
@@ -141,6 +141,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
         }
 
         // Start with a random solution
+        shuffleArray(allNodes);
         int[] currentPath = Arrays.copyOfRange(allNodes, 0, k);
         shuffleArray(currentPath);
 
