@@ -97,16 +97,6 @@ abstract class Heuristic {
     final Random random = new Random();
 
     /**
-     * Generates a solution based on the heuristic.
-     *
-     * @param instance  The problem instance
-     * @param k         Number of nodes to select
-     * @param startNode The starting node index
-     * @return A Solution object
-     */
-    public abstract Solution generateSolution(ProblemInstance instance, int k, int startNode);
-
-    /**
      * Computes the objective function: sum of path lengths + sum of node costs
      */
     int computeObjective(int[] path, ProblemInstance instance) {
@@ -133,22 +123,15 @@ abstract class Heuristic {
  */
 class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
 
-    @Override
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
-        // For compatibility, we can set a default maxIterations if not specified
-        return generateSolution(instance, k, startNode, Integer.MAX_VALUE);
-    }
-
     /**
      * Generates a solution using local search with a maximum number of iterations.
      *
      * @param instance      The problem instance
      * @param k             Number of nodes to select
-     * @param startNode     The starting node index
      * @param maxIterations Maximum number of iterations to perform
      * @return A Solution object
      */
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode, int maxIterations) {
+    public Solution generateSolution(ProblemInstance instance, int k, int maxIterations) {
         // Generate random initial path
         Node[] nodes = instance.nodes;
         int n = nodes.length;
@@ -162,20 +145,18 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
         int[] currentPath = Arrays.copyOfRange(allNodes, 0, k);
         shuffleArray(currentPath);
 
-        return generateSolutionFromPath(instance, k, startNode, currentPath, maxIterations);
+        return generateSolutionFromPath(instance, currentPath, maxIterations);
     }
 
     /**
      * Generates a solution starting from an initial path, with a maximum number of iterations.
      *
      * @param instance      The problem instance
-     * @param k             Number of nodes to select
-     * @param startNode     The starting node index
      * @param initialPath   The initial path to start from
      * @param maxIterations Maximum number of iterations to perform
      * @return A Solution object
      */
-    public Solution generateSolutionFromPath(ProblemInstance instance, int k, int startNode, int[] initialPath, int maxIterations) {
+    public Solution generateSolutionFromPath(ProblemInstance instance, int[] initialPath, int maxIterations) {
         int[] currentPath = Arrays.copyOf(initialPath, initialPath.length);
 
         int iterationCount = 0;
@@ -425,12 +406,18 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
  */
 class MultipleStartLocalSearch extends Heuristic {
 
-    @Override
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+    public Solution generateSolution(ProblemInstance instance, int k) {
         SteepestLocalSearchWithMoveEvaluation ls = new SteepestLocalSearchWithMoveEvaluation();
+        Solution bestSolution = null;
 
-        // Perform local search starting from a random solution, limited to 200 iterations
-        return ls.generateSolution(instance, k, startNode, 200);
+        // Perform 200 runs of basic local search
+        for (int i = 0; i < 200; i++) {
+            Solution sol = ls.generateSolution(instance, k, Integer.MAX_VALUE);
+            if (bestSolution == null || sol.objectiveValue < bestSolution.objectiveValue) {
+                bestSolution = sol;
+            }
+        }
+        return bestSolution;
     }
 }
 
@@ -445,23 +432,15 @@ class IteratedLocalSearch extends Heuristic {
         this.maxTime = maxTime;
     }
 
-    @Override
-    public Solution generateSolution(ProblemInstance instance, int k, int startNode) {
+    public Solution generateSolution(ProblemInstance instance, int k) {
         numLocalSearches = 0;
         long startTime = System.nanoTime();
         long maxDuration = (long) (maxTime * 1e6); // Convert milliseconds to nanoseconds
 
-        // Ensure ILS runs for at least a minimum time
-        long minDuration = 100 * 1_000_000; // 100 ms
-
-        if (maxDuration < minDuration) {
-            maxDuration = minDuration;
-        }
-
         SteepestLocalSearchWithMoveEvaluation ls = new SteepestLocalSearchWithMoveEvaluation();
 
         // Start from a random solution
-        Solution currentSolution = ls.generateSolution(instance, k, startNode, Integer.MAX_VALUE);
+        Solution currentSolution = ls.generateSolution(instance, k, Integer.MAX_VALUE);
         numLocalSearches++;
 
         Solution bestSolution = currentSolution;
@@ -472,7 +451,7 @@ class IteratedLocalSearch extends Heuristic {
             int[] perturbedPath = perturbSolution(currentSolution.path, random);
 
             // Apply local search to the perturbed solution
-            Solution newSolution = ls.generateSolutionFromPath(instance, k, startNode, perturbedPath, Integer.MAX_VALUE);
+            Solution newSolution = ls.generateSolutionFromPath(instance, perturbedPath, Integer.MAX_VALUE);
             numLocalSearches++;
 
             // Acceptance Criteria: Accept if better than current or with a probability
@@ -705,35 +684,41 @@ public class Main {
             System.out.println("Running Multiple Start Local Search (MSLS)...");
             List<Solution> mslsSolutions = new ArrayList<>();
             double totalMslsTime = 0.0;
+            long mslsStartTime = System.nanoTime();
             for (int run = 0; run < 20; run++) {
                 MultipleStartLocalSearch msls = new MultipleStartLocalSearch();
                 long startTime = System.nanoTime();
-                Solution sol = msls.generateSolution(instance, k, 0);
+                Solution sol = msls.generateSolution(instance, k);
                 long endTime = System.nanoTime();
                 double durationMs = (endTime - startTime) / 1e6;
                 totalMslsTime += durationMs;
                 mslsSolutions.add(sol);
             }
+            long mslsEndTime = System.nanoTime();
+            double mslsTotalTime = (mslsEndTime - mslsStartTime) / 1e6; // Total time in milliseconds
             double mslsAvgTime = totalMslsTime / 20;
 
-            // Ensure minimum runtime for ILS
-            double ilsRunTime = Math.max(mslsAvgTime, 100.0); // At least 100 ms
+            // Set ILS runtime to average MSLS runtime per run
+            double ilsRunTime = mslsAvgTime;
 
             // Run Iterated Local Search (ILS)
             System.out.println("Running Iterated Local Search (ILS)...");
             List<Solution> ilsSolutions = new ArrayList<>();
             double totalIlsTime = 0.0;
+            long ilsStartTime = System.nanoTime();
             List<Integer> ilsNumLocalSearchesList = new ArrayList<>();
             for (int run = 0; run < 20; run++) {
                 IteratedLocalSearch ils = new IteratedLocalSearch(ilsRunTime);
                 long startTime = System.nanoTime();
-                Solution sol = ils.generateSolution(instance, k, 0);
+                Solution sol = ils.generateSolution(instance, k);
                 long endTime = System.nanoTime();
                 double durationMs = (endTime - startTime) / 1e6;
                 totalIlsTime += durationMs;
                 ilsSolutions.add(sol);
                 ilsNumLocalSearchesList.add(ils.numLocalSearches);
             }
+            long ilsEndTime = System.nanoTime();
+            double ilsTotalTime = (ilsEndTime - ilsStartTime) / 1e6; // Total time in milliseconds
             double avgIlsTime = totalIlsTime / 20;
             double totalNumLocalSearches = 0;
             for (int numLS : ilsNumLocalSearchesList) {
@@ -755,6 +740,7 @@ public class Main {
             System.out.println("Max Objective: " + mslsStats.maxObjective);
             System.out.printf("Average Objective: %.2f%n", mslsStats.avgObjective);
             System.out.printf("Average Time per run: %.2f ms%n", mslsAvgTime);
+            System.out.printf("Total Execution Time: %.2f ms%n", mslsTotalTime);
             System.out.println("Best Solution Path: " + Arrays.toString(mslsStats.bestPath) + "\n");
 
             // Save best path for MSLS
@@ -772,6 +758,7 @@ public class Main {
             System.out.println("Max Objective: " + ilsStats.maxObjective);
             System.out.printf("Average Objective: %.2f%n", ilsStats.avgObjective);
             System.out.printf("Average Time per run: %.2f ms%n", avgIlsTime);
+            System.out.printf("Total Execution Time: %.2f ms%n", ilsTotalTime);
             System.out.printf("Average number of local searches: %.2f%n", avgNumLocalSearches);
             System.out.println("Best Solution Path: " + Arrays.toString(ilsStats.bestPath) + "\n");
 
@@ -787,7 +774,7 @@ public class Main {
             System.out.println("Finished processing instance: " + instanceName + "\n");
         }
 
-        // After processing all instances, run the Python script
+        // After processing all instances, run the Python script (if applicable)
         String pythonScript = "Evolutionary Computation\\plots_results.py";
         System.out.println("All instances processed. Executing '" + pythonScript + "'...");
         try {
