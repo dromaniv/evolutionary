@@ -481,11 +481,6 @@ class IteratedLocalSearch extends Heuristic {
     private int[] perturbSolution(int[] path, Random random) {
         int n = path.length;
 
-        if (n < 6) {
-            // For small n, perform a simple 2-opt perturbation
-            return twoOptPerturbation(path, random);
-        }
-
         // Generate four random, distinct integers in range [1, n - 2]
         TreeSet<Integer> indicesSet = new TreeSet<>();
         while (indicesSet.size() < 4) {
@@ -524,42 +519,6 @@ class IteratedLocalSearch extends Heuristic {
         // Copy Segment5: path[l to n - 1]
         for (int idx = l; idx < n; idx++) {
             newPath[pos++] = path[idx];
-        }
-
-        return newPath;
-    }
-
-    /**
-     * Performs a simple 2-opt perturbation by reversing a subsequence.
-     * This is used when the instance size is too small for a double-bridge move.
-     *
-     * @param path   The current solution path
-     * @param random Random number generator
-     * @return A new perturbed path
-     */
-    private int[] twoOptPerturbation(int[] path, Random random) {
-        int n = path.length;
-        int i = random.nextInt(n);
-        int j = random.nextInt(n);
-        while (j == i) {
-            j = random.nextInt(n);
-        }
-
-        if (i > j) {
-            int temp = i;
-            i = j;
-            j = temp;
-        }
-
-        int[] newPath = Arrays.copyOf(path, n);
-
-        // Reverse the subsequence between i and j
-        while (i < j) {
-            int temp = newPath[i];
-            newPath[i] = newPath[j];
-            newPath[j] = temp;
-            i++;
-            j--;
         }
 
         return newPath;
