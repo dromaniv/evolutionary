@@ -1,5 +1,6 @@
 import java.io.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Represents a node with x and y coordinates and a cost.
@@ -127,31 +128,6 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
      * Generates a solution using local search with a maximum number of iterations.
      *
      * @param instance      The problem instance
-     * @param k             Number of nodes to select
-     * @param maxIterations Maximum number of iterations to perform
-     * @return A Solution object
-     */
-    public Solution generateSolution(ProblemInstance instance, int k, int maxIterations) {
-        // Generate random initial path
-        Node[] nodes = instance.nodes;
-        int n = nodes.length;
-        int[] allNodes = new int[n];
-        for (int i = 0; i < n; i++) {
-            allNodes[i] = i;
-        }
-
-        // Start with a random solution
-        shuffleArray(allNodes);
-        int[] currentPath = Arrays.copyOfRange(allNodes, 0, k);
-        shuffleArray(currentPath);
-
-        return generateSolutionFromPath(instance, currentPath, maxIterations);
-    }
-
-    /**
-     * Generates a solution starting from an initial path, with a maximum number of iterations.
-     *
-     * @param instance      The problem instance
      * @param initialPath   The initial path to start from
      * @param maxIterations Maximum number of iterations to perform
      * @return A Solution object
@@ -230,7 +206,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
                 }
             }
 
-            // Inter-route moves (Swap selected with unselected node)
+            // Inter-route moves (swap selected with unselected)
             for (int i = 0; i < nPath; i++) {
                 int u = currentPath[i];
                 int prev = currentPath[(i - 1 + nPath) % nPath];
@@ -263,12 +239,36 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
                 bestMove.apply(currentPath, inPathSet);
                 improvement = true;
                 improvingMoves.clear();
-                improvingMoves.add(new Move(bestMove)); // Save the move for future iterations
+                improvingMoves.add(new Move(bestMove));
             }
         }
 
         int objective = computeObjective(currentPath, instance);
         return new Solution(currentPath, objective);
+    }
+
+    /**
+     * Generates a random initial solution and then applies local search.
+     *
+     * @param instance      The problem instance
+     * @param k             Number of nodes to select
+     * @param maxIterations Maximum iterations for local search
+     * @return A Solution object
+     */
+    public Solution generateSolution(ProblemInstance instance, int k, int maxIterations) {
+        Node[] nodes = instance.nodes;
+        int n = nodes.length;
+        int[] allNodes = new int[n];
+        for (int i = 0; i < n; i++) {
+            allNodes[i] = i;
+        }
+
+        // Start with a random solution
+        shuffleArray(allNodes);
+        int[] currentPath = Arrays.copyOfRange(allNodes, 0, k);
+        shuffleArray(currentPath);
+
+        return generateSolutionFromPath(instance, currentPath, maxIterations);
     }
 
     private void shuffleArray(int[] array) {
@@ -290,7 +290,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
         int nodeA, nodeB, nodeC, nodeD;
 
         // For inter-route moves
-        int nodeU; // Original node at index1 when the move was created
+        int nodeU; // Original node at index1
 
         Move() {
         }
@@ -344,9 +344,9 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
                 int c = path[index2];
                 int d = path[(index2 + 1) % n];
 
-                int delta = -distanceMatrix[a][b] - distanceMatrix[c][d]
+                return -distanceMatrix[a][b] - distanceMatrix[c][d]
                         + distanceMatrix[a][c] + distanceMatrix[b][d];
-                return delta;
+
             } else if (type == MoveType.INTER_ROUTE) {
                 int n = path.length;
                 int u = path[index1];
@@ -354,10 +354,9 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
                 int prev = path[(index1 - 1 + n) % n];
                 int next = path[(index1 + 1) % n];
 
-                int delta = -distanceMatrix[prev][u] - distanceMatrix[u][next]
+                return -distanceMatrix[prev][u] - distanceMatrix[u][next]
                         + distanceMatrix[prev][v] + distanceMatrix[v][next]
                         - nodes[u].cost + nodes[v].cost;
-                return delta;
             }
             return Integer.MAX_VALUE;
         }
@@ -402,126 +401,221 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
 }
 
 /**
- * Implements Multiple Start Local Search (MSLS).
+ * Implements the Greedy Weighted Regret heuristic for solution construction (repair).
+ * It uses a weighted combination of the regret value and the best increase.
  */
-class MultipleStartLocalSearch extends Heuristic {
+class GreedyWeightedRegret extends Heuristic {
+    private final double w1; // Weight for regret
+    private final double w2; // Weight for best increase
 
-    public Solution generateSolution(ProblemInstance instance, int k) {
-        SteepestLocalSearchWithMoveEvaluation ls = new SteepestLocalSearchWithMoveEvaluation();
-        Solution bestSolution = null;
+    public GreedyWeightedRegret() {
+        this.w1 = 1;
+        this.w2 = 1;
+    }
 
-        // Perform 200 runs of basic local search
-        for (int i = 0; i < 200; i++) {
-            Solution sol = ls.generateSolution(instance, k, Integer.MAX_VALUE);
-            if (bestSolution == null || sol.objectiveValue < bestSolution.objectiveValue) {
-                bestSolution = sol;
+    public GreedyWeightedRegret(double w1, double w2) {
+        this.w1 = w1;
+        this.w2 = w2;
+    }
+
+    public Solution generateSolution(ProblemInstance instance, List<Integer> partialPath, Set<Integer> selected, int k) {
+        // partialPath: currently constructed partial solution
+        // selected: set of already selected nodes
+        // k: target number of nodes in the solution
+        Node[] nodes = instance.nodes;
+        int n = nodes.length;
+        int[][] distanceMatrix = instance.distanceMatrix;
+        List<Integer> path = new ArrayList<>(partialPath);
+
+        while (path.size() < k) {
+            int bestNode = -1;
+            double bestWeightedValue = Double.NEGATIVE_INFINITY;
+            int bestInsertionPosition = -1;
+
+            for (int node = 0; node < n; node++) {
+                if (selected.contains(node)) {
+                    continue;
+                }
+                InsertionInfo insertionInfo = findBestAndSecondBestInsertion(path, node, distanceMatrix);
+
+                if (insertionInfo == null) {
+                    continue;
+                }
+
+                int regretValue = insertionInfo.secondBestIncrease - insertionInfo.bestIncrease;
+                double weightedValue = w1 * regretValue - w2 * (insertionInfo.bestIncrease + nodes[node].cost);
+
+                if (weightedValue > bestWeightedValue) {
+                    bestWeightedValue = weightedValue;
+                    bestNode = node;
+                    bestInsertionPosition = insertionInfo.position;
+                }
+            }
+
+            if (bestNode != -1 && bestInsertionPosition != -1) {
+                path.add(bestInsertionPosition, bestNode);
+                selected.add(bestNode);
+            } else {
+                // No more nodes can be added
+                break;
             }
         }
-        return bestSolution;
+
+        int objective = computeObjective(path.stream().mapToInt(Integer::intValue).toArray(), instance);
+        return new Solution(path.stream().mapToInt(Integer::intValue).toArray(), objective);
+    }
+
+    protected InsertionInfo findBestAndSecondBestInsertion(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
+        if (path.isEmpty()) {
+            return new InsertionInfo(0,0,0);
+        }
+
+        int bestIncrease = Integer.MAX_VALUE;
+        int secondBestIncrease = Integer.MAX_VALUE;
+        int bestPos = -1;
+        int pathSize = path.size();
+
+        for (int i = 0; i < pathSize; i++) {
+            int current = path.get(i);
+            int next = path.get((i + 1) % pathSize);
+            int increase = distanceMatrix[current][nodeToInsert] + distanceMatrix[nodeToInsert][next] - distanceMatrix[current][next];
+
+            if (increase < bestIncrease) {
+                secondBestIncrease = bestIncrease;
+                bestIncrease = increase;
+                bestPos = i + 1;
+            } else if (increase < secondBestIncrease) {
+                secondBestIncrease = increase;
+            }
+        }
+
+        // If we never found a second best, set it equal to best
+        if (secondBestIncrease == Integer.MAX_VALUE) {
+            secondBestIncrease = bestIncrease;
+        }
+
+        return new InsertionInfo(bestPos, bestIncrease, secondBestIncrease);
+    }
+
+    protected static class InsertionInfo {
+        int position;
+        int bestIncrease;
+        int secondBestIncrease;
+
+        public InsertionInfo(int position, int bestIncrease, int secondBestIncrease) {
+            this.position = position;
+            this.bestIncrease = bestIncrease;
+            this.secondBestIncrease = secondBestIncrease;
+        }
     }
 }
 
 /**
- * Implements Iterated Local Search (ILS).
+ * Large Neighborhood Search (LNS) implementation.
+ * The LNS algorithm:
+ * 1. Generate an initial solution x (random)
+ * 2. x := Local search(x) (optional)
+ * 3. Repeat until time/iteration limits:
+ *    a. y := Destroy(x) (remove a large fraction of nodes)
+ *    b. y := Repair(y) using GreedyWeightedRegret
+ *    c. y := Local search(y) (optional, depending on version)
+ *    d. If f(y) > f(x) then x := y
  */
-class IteratedLocalSearch extends Heuristic {
-    private final double maxTime; // in milliseconds
-    public int numLocalSearches;
+class LargeNeighborhoodSearch extends Heuristic {
+    private final ProblemInstance instance;
+    private final int k;
+    private final double maxTimeMs;
+    private final boolean applyLocalSearchEachIteration;
+    private final double destroyFraction = 0.25; // remove about 20-30%
+    private final GreedyWeightedRegret repairHeuristic;
+    private final SteepestLocalSearchWithMoveEvaluation localSearch;
 
-    public IteratedLocalSearch(double maxTime) {
-        this.maxTime = maxTime;
+    public int numIterations;
+
+    public LargeNeighborhoodSearch(ProblemInstance instance, int k, double maxTimeMs, boolean applyLocalSearchEachIteration) {
+        this.instance = instance;
+        this.k = k;
+        this.maxTimeMs = maxTimeMs;
+        this.applyLocalSearchEachIteration = applyLocalSearchEachIteration;
+        this.repairHeuristic = new GreedyWeightedRegret();
+        this.localSearch = new SteepestLocalSearchWithMoveEvaluation();
     }
 
-    public Solution generateSolution(ProblemInstance instance, int k) {
-        numLocalSearches = 0;
+    public Solution run() {
         long startTime = System.nanoTime();
-        long maxDuration = (long) (maxTime * 1e6); // Convert milliseconds to nanoseconds
+        long maxDuration = (long) (maxTimeMs * 1e6); // Convert ms to ns
 
-        SteepestLocalSearchWithMoveEvaluation ls = new SteepestLocalSearchWithMoveEvaluation();
+        // 1. Generate initial solution (random)
+        int n = instance.nodes.length;
+        int[] allNodes = new int[n];
+        for (int i = 0; i < n; i++) {
+            allNodes[i] = i;
+        }
+        shuffleArray(allNodes);
+        int[] currentPath = Arrays.copyOfRange(allNodes, 0, k);
+        shuffleArray(currentPath);
 
-        // Start from a random solution
-        Solution currentSolution = ls.generateSolution(instance, k, Integer.MAX_VALUE);
-        numLocalSearches++;
+        // 2. Apply local search to initial solution
+        Solution currentSol = localSearch.generateSolutionFromPath(instance, currentPath, Integer.MAX_VALUE);
 
-        Solution bestSolution = currentSolution;
-        Random random = new Random();
-
+        // Main loop
+        numIterations = 0;
         while ((System.nanoTime() - startTime) < maxDuration) {
-            // Perturb current solution
-            int[] perturbedPath = perturbSolution(currentSolution.path, random);
+            numIterations++;
 
-            // Apply local search to the perturbed solution
-            Solution newSolution = ls.generateSolutionFromPath(instance, perturbedPath, Integer.MAX_VALUE);
-            numLocalSearches++;
+            // a. Destroy current solution
+            Solution destroyed = destroy(currentSol);
 
-            // Acceptance Criteria: Accept if better than current or with a probability
-            if (newSolution.objectiveValue < bestSolution.objectiveValue) {
-                bestSolution = newSolution;
-                currentSolution = newSolution;
-            } else {
-                // Accept with a probability (e.g., 0.1) to allow exploration
-                if (random.nextDouble() < 0.1) {
-                    currentSolution = newSolution;
-                }
+            // b. Repair solution using GreedyWeightedRegret
+            Solution repaired = repair(destroyed);
+
+            // c. Local search (optional)
+            if (applyLocalSearchEachIteration) {
+                repaired = localSearch.generateSolutionFromPath(instance, repaired.path, Integer.MAX_VALUE);
+            }
+
+            // d. If better, accept
+            if (repaired.objectiveValue < currentSol.objectiveValue) {
+                currentSol = repaired;
             }
         }
 
-        return bestSolution;
+        return currentSol;
     }
 
-    /**
-     * Perturbation operator: Performs a double-bridge move.
-     * This operator removes four edges and reconnects the segments differently.
-     * It is effective in escaping local optima in TSP problems.
-     *
-     * @param path   The current solution path
-     * @param random Random number generator
-     * @return A new perturbed path
-     */
-    private int[] perturbSolution(int[] path, Random random) {
-        int n = path.length;
+    private Solution destroy(Solution solution) {
+        // Destroy operator: remove a fraction of nodes from solution
+        // We'll remove about destroyFraction * k nodes randomly
+        List<Integer> pathList = Arrays.stream(solution.path).boxed().collect(Collectors.toList());
+        int removeCount = (int) Math.ceil(destroyFraction * pathList.size());
 
-        // Generate four random, distinct integers in range [1, n - 2]
-        TreeSet<Integer> indicesSet = new TreeSet<>();
-        while (indicesSet.size() < 4) {
-            indicesSet.add(1 + random.nextInt(n - 3)); // random integer from 1 to n - 3 inclusive
-        }
-        List<Integer> indicesList = new ArrayList<>(indicesSet);
-        int i = indicesList.get(0);
-        int j = indicesList.get(1);
-        int k = indicesList.get(2);
-        int l = indicesList.get(3);
-
-        // Create new path by swapping segments
-        int[] newPath = new int[n];
-        int pos = 0;
-
-        // Copy Segment1: path[0 to i - 1]
-        for (int idx = 0; idx < i; idx++) {
-            newPath[pos++] = path[idx];
+        // Remove random nodes (not the entire path, but chosen at random)
+        for (int i = 0; i < removeCount; i++) {
+            int removeIndex = random.nextInt(pathList.size());
+            pathList.remove(removeIndex);
         }
 
-        // Copy Segment3: path[j to k - 1]
-        for (int idx = j; idx < k; idx++) {
-            newPath[pos++] = path[idx];
-        }
+        int[] newPath = pathList.stream().mapToInt(Integer::intValue).toArray();
+        int newObjective = computeObjective(newPath, instance);
+        return new Solution(newPath, newObjective);
+    }
 
-        // Copy Segment2: path[i to j - 1]
-        for (int idx = i; idx < j; idx++) {
-            newPath[pos++] = path[idx];
-        }
+    private Solution repair(Solution partialSolution) {
+        // Use the GreedyWeightedRegret to insert nodes until we have k nodes again
+        Set<Integer> selected = Arrays.stream(partialSolution.path).boxed().collect(Collectors.toSet());
+        List<Integer> partialPath = Arrays.stream(partialSolution.path).boxed().collect(Collectors.toList());
 
-        // Copy Segment4: path[k to l - 1]
-        for (int idx = k; idx < l; idx++) {
-            newPath[pos++] = path[idx];
-        }
+        return repairHeuristic.generateSolution(instance, partialPath, selected, k);
+    }
 
-        // Copy Segment5: path[l to n - 1]
-        for (int idx = l; idx < n; idx++) {
-            newPath[pos++] = path[idx];
+    private void shuffleArray(int[] array) {
+        int index, temp;
+        for (int i = array.length - 1; i > 0; i--) {
+            index = random.nextInt(i + 1);
+            temp = array[index];
+            array[index] = array[i];
+            array[i] = temp;
         }
-
-        return newPath;
     }
 }
 
@@ -571,12 +665,8 @@ class Statistics {
     }
 }
 
-/**
- * The main class to execute the program.
- */
 public class Main {
     public static void main(String[] args) {
-        // Define the input directory
         String inputDirPath = "inputs";
         File inputDir = new File(inputDirPath);
 
@@ -585,10 +675,7 @@ public class Main {
             return;
         }
 
-        // List all CSV files in the input directory
         File[] inputFiles = inputDir.listFiles((_, name) -> name.toLowerCase().endsWith(".csv"));
-
-        // Sort the files by name
         if (inputFiles != null) {
             Arrays.sort(inputFiles, Comparator.comparing(File::getName));
         }
@@ -598,7 +685,15 @@ public class Main {
             return;
         }
 
-        // Iterate over each input file
+        // According to the instructions, we use the average running time of MSLS from previous problem (~870 ms)
+        // as the stopping criterion for LNS to allow fair comparison.
+        double maxTimeMs = 870.0;
+
+        // We will implement and test two versions of LNS:
+        // 1. LNS with local search after each destroy-repair iteration
+        // 2. LNS without local search after each destroy-repair iteration
+        // Always apply local search to the initial solution inside the LNS.
+
         for (File inputFile : inputFiles) {
             String fileName = inputFile.getName();
             String instanceName = fileName.substring(0, fileName.lastIndexOf('.')); // Remove .csv extension
@@ -617,7 +712,7 @@ public class Main {
 
             } catch (IOException e) {
                 System.err.println("Error reading the CSV file '" + fileName + "': " + e.getMessage());
-                continue; // Proceed to the next file
+                continue;
             }
 
             int n = instance.nodes.length;
@@ -639,101 +734,93 @@ public class Main {
                 }
             }
 
-            // Run Multiple Start Local Search (MSLS)
-            System.out.println("Running Multiple Start Local Search (MSLS)...");
-            List<Solution> mslsSolutions = new ArrayList<>();
-            double totalMslsTime = 0.0;
-            long mslsStartTime = System.nanoTime();
+            // Run LNS with local search after each iteration
+            System.out.println("Running LNS with local search after each iteration...");
+            List<Solution> lnsWithLSsolutions = new ArrayList<>();
+            List<Integer> lnsWithLSIterations = new ArrayList<>();
+            double totalLnsWithLsTime = 0.0;
+
             for (int run = 0; run < 20; run++) {
-                MultipleStartLocalSearch msls = new MultipleStartLocalSearch();
+                LargeNeighborhoodSearch lns = new LargeNeighborhoodSearch(instance, k, maxTimeMs, true);
                 long startTime = System.nanoTime();
-                Solution sol = msls.generateSolution(instance, k);
+                Solution sol = lns.run();
                 long endTime = System.nanoTime();
                 double durationMs = (endTime - startTime) / 1e6;
-                totalMslsTime += durationMs;
-                mslsSolutions.add(sol);
+                totalLnsWithLsTime += durationMs;
+                lnsWithLSsolutions.add(sol);
+                lnsWithLSIterations.add(lns.numIterations);
             }
-            long mslsEndTime = System.nanoTime();
-            double mslsTotalTime = (mslsEndTime - mslsStartTime) / 1e6; // Total time in milliseconds
-            double mslsAvgTime = totalMslsTime / 20;
 
-            // Set ILS runtime to average MSLS runtime per run
-            double ilsRunTime = mslsAvgTime;
+            double avgLnsWithLsTime = totalLnsWithLsTime / 20;
+            double avgLnsWithLsIterations = lnsWithLSIterations.stream().mapToDouble(a -> a).average().orElse(0.0);
 
-            // Run Iterated Local Search (ILS)
-            System.out.println("Running Iterated Local Search (ILS)...");
-            List<Solution> ilsSolutions = new ArrayList<>();
-            double totalIlsTime = 0.0;
-            long ilsStartTime = System.nanoTime();
-            List<Integer> ilsNumLocalSearchesList = new ArrayList<>();
+            Statistics lnsWithLSStats = Statistics.computeStatistics(lnsWithLSsolutions);
+
+            // Run LNS without local search after each iteration
+            System.out.println("Running LNS without local search after each iteration...");
+            List<Solution> lnsNoLSsolutions = new ArrayList<>();
+            List<Integer> lnsNoLSIterations = new ArrayList<>();
+            double totalLnsNoLsTime = 0.0;
+
             for (int run = 0; run < 20; run++) {
-                IteratedLocalSearch ils = new IteratedLocalSearch(ilsRunTime);
+                LargeNeighborhoodSearch lns = new LargeNeighborhoodSearch(instance, k, maxTimeMs, false);
                 long startTime = System.nanoTime();
-                Solution sol = ils.generateSolution(instance, k);
+                Solution sol = lns.run();
                 long endTime = System.nanoTime();
                 double durationMs = (endTime - startTime) / 1e6;
-                totalIlsTime += durationMs;
-                ilsSolutions.add(sol);
-                ilsNumLocalSearchesList.add(ils.numLocalSearches);
+                totalLnsNoLsTime += durationMs;
+                lnsNoLSsolutions.add(sol);
+                lnsNoLSIterations.add(lns.numIterations);
             }
-            long ilsEndTime = System.nanoTime();
-            double ilsTotalTime = (ilsEndTime - ilsStartTime) / 1e6; // Total time in milliseconds
-            double avgIlsTime = totalIlsTime / 20;
-            double totalNumLocalSearches = 0;
-            for (int numLS : ilsNumLocalSearchesList) {
-                totalNumLocalSearches += numLS;
-            }
-            double avgNumLocalSearches = totalNumLocalSearches / 20;
 
-            // Compute statistics for MSLS
-            Statistics mslsStats = Statistics.computeStatistics(mslsSolutions);
-            // Compute statistics for ILS
-            Statistics ilsStats = Statistics.computeStatistics(ilsSolutions);
+            double avgLnsNoLsTime = totalLnsNoLsTime / 20;
+            double avgLnsNoLsIterations = lnsNoLSIterations.stream().mapToDouble(a -> a).average().orElse(0.0);
+
+            Statistics lnsNoLSStats = Statistics.computeStatistics(lnsNoLSsolutions);
 
             // Output results
-            System.out.println("\n--- Computational Experiment Results for Instance: " + instanceName + " ---\n");
+            System.out.println("\n--- LNS Computational Results for Instance: " + instanceName + " ---\n");
 
-            // Results for MSLS
-            System.out.println("Method: Multiple Start Local Search (MSLS)");
-            System.out.println("Min Objective: " + mslsStats.minObjective);
-            System.out.println("Max Objective: " + mslsStats.maxObjective);
-            System.out.printf("Average Objective: %.2f%n", mslsStats.avgObjective);
-            System.out.printf("Average Time per run: %.2f ms%n", mslsAvgTime);
-            System.out.printf("Total Execution Time: %.2f ms%n", mslsTotalTime);
-            System.out.println("Best Solution Path: " + Arrays.toString(mslsStats.bestPath) + "\n");
+            // Results for LNS with LS
+            System.out.println("Method: LNS with local search after each iteration");
+            System.out.println("Min Objective: " + lnsWithLSStats.minObjective);
+            System.out.println("Max Objective: " + lnsWithLSStats.maxObjective);
+            System.out.printf("Average Objective: %.2f%n", lnsWithLSStats.avgObjective);
+            System.out.printf("Average Time per run: %.2f ms%n", avgLnsWithLsTime);
+            System.out.printf("Average Number of Iterations: %.2f%n", avgLnsWithLsIterations);
+            System.out.println("Best Solution Path: " + Arrays.toString(lnsWithLSStats.bestPath) + "\n");
 
-            // Save best path for MSLS
-            String mslsOutputFileName = outputInstanceDirPath + "/MSLS.csv";
+            // Save best path for LNS with LS
+            String lnsWithLSFileName = outputInstanceDirPath + "/LNS_with_LS.csv";
             try {
-                saveBestPathToCSV(mslsStats.bestPath, mslsOutputFileName);
-                System.out.println("Best path for MSLS saved to " + mslsOutputFileName + "\n");
+                saveBestPathToCSV(lnsWithLSStats.bestPath, lnsWithLSFileName);
+                System.out.println("Best path for LNS with LS saved to " + lnsWithLSFileName + "\n");
             } catch (IOException e) {
-                System.err.println("Error writing best path to CSV for MSLS: " + e.getMessage());
+                System.err.println("Error writing best path to CSV for LNS with LS: " + e.getMessage());
             }
 
-            // Results for ILS
-            System.out.println("Method: Iterated Local Search (ILS)");
-            System.out.println("Min Objective: " + ilsStats.minObjective);
-            System.out.println("Max Objective: " + ilsStats.maxObjective);
-            System.out.printf("Average Objective: %.2f%n", ilsStats.avgObjective);
-            System.out.printf("Average Time per run: %.2f ms%n", avgIlsTime);
-            System.out.printf("Total Execution Time: %.2f ms%n", ilsTotalTime);
-            System.out.printf("Average number of local searches: %.2f%n", avgNumLocalSearches);
-            System.out.println("Best Solution Path: " + Arrays.toString(ilsStats.bestPath) + "\n");
+            // Results for LNS without LS
+            System.out.println("Method: LNS without local search after each iteration");
+            System.out.println("Min Objective: " + lnsNoLSStats.minObjective);
+            System.out.println("Max Objective: " + lnsNoLSStats.maxObjective);
+            System.out.printf("Average Objective: %.2f%n", lnsNoLSStats.avgObjective);
+            System.out.printf("Average Time per run: %.2f ms%n", avgLnsNoLsTime);
+            System.out.printf("Average Number of Iterations: %.2f%n", avgLnsNoLsIterations);
+            System.out.println("Best Solution Path: " + Arrays.toString(lnsNoLSStats.bestPath) + "\n");
 
-            // Save best path for ILS
-            String ilsOutputFileName = outputInstanceDirPath + "/ILS.csv";
+            // Save best path for LNS without LS
+            String lnsNoLSFileName = outputInstanceDirPath + "/LNS_no_LS.csv";
             try {
-                saveBestPathToCSV(ilsStats.bestPath, ilsOutputFileName);
-                System.out.println("Best path for ILS saved to " + ilsOutputFileName + "\n");
+                saveBestPathToCSV(lnsNoLSStats.bestPath, lnsNoLSFileName);
+                System.out.println("Best path for LNS without LS saved to " + lnsNoLSFileName + "\n");
             } catch (IOException e) {
-                System.err.println("Error writing best path to CSV for ILS: " + e.getMessage());
+                System.err.println("Error writing best path to CSV for LNS without LS: " + e.getMessage());
             }
 
             System.out.println("Finished processing instance: " + instanceName + "\n");
         }
 
-        // After processing all instances, run the Python script (if applicable)
+        // Attempt to run Python script for plotting (if applicable)
         String pythonScript = "Evolutionary Computation\\plots_results.py";
         System.out.println("All instances processed. Executing '" + pythonScript + "'...");
         try {
