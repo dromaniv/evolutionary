@@ -1,5 +1,7 @@
 import java.io.*;
 import java.util.*;
+import java.util.Comparator;
+import java.util.stream.Collectors;
 
 /**
  * Represents a node with x and y coordinates and a cost.
@@ -568,13 +570,35 @@ class Statistics {
     }
 }
 
+
+
 /**
  * The main class to execute the program.
  */
 public class Main {
+    private static void saveAllPathsToCSV(List<Solution> solutions, String fileName) throws IOException {
+        // Sort the solutions based on objective value in ascending order
+        solutions.sort(Comparator.comparingInt(Solution::getObjectiveValue));
+    
+        BufferedWriter writer = new BufferedWriter(new FileWriter(fileName));
+        for (Solution sol : solutions) {
+            int objectiveValue = sol.getObjectiveValue();
+            List<Integer> path = sol.getPath();
+    
+            // Convert path to comma-separated string
+            String pathString = path.stream()
+                    .map(String::valueOf)
+                    .collect(Collectors.joining(", "));
+    
+            // Write to file in the format: objective; path
+            writer.write(objectiveValue + "; " + pathString);
+            writer.newLine();
+        }
+        writer.close();
+    }
     public static void main(String[] args) {
         // Define the input directory
-        String inputDirPath = "inputs";
+        String inputDirPath = "C:\\Users\\wazus\\OneDrive\\Desktop\\Evolutionary Computation ALL\\evolutionary\\inputs";
         File inputDir = new File(inputDirPath);
 
         if (!inputDir.exists() || !inputDir.isDirectory()) {
@@ -583,7 +607,7 @@ public class Main {
         }
 
         // List all CSV files in the input directory
-        File[] inputFiles = inputDir.listFiles((_, name) -> name.toLowerCase().endsWith(".csv"));
+        File[] inputFiles = inputDir.listFiles((__, name) -> name.toLowerCase().endsWith(".csv"));
 
         // Sort the files by name
         if (inputFiles != null) {
@@ -601,9 +625,9 @@ public class Main {
         LocalSearch localSearch = new LocalSearch();
 
         // Define combinations of options
-        LocalSearch.LocalSearchType[] searchTypes = {LocalSearch.LocalSearchType.STEEPEST, LocalSearch.LocalSearchType.GREEDY};
-        LocalSearch.IntraRouteMoveType[] moveTypes = {LocalSearch.IntraRouteMoveType.TWO_NODES_EXCHANGE, LocalSearch.IntraRouteMoveType.TWO_EDGES_EXCHANGE};
-        boolean[] startingSolutions = {true, false}; // true for random, false for greedy
+        LocalSearch.LocalSearchType[] searchTypes = {LocalSearch.LocalSearchType.GREEDY};
+        LocalSearch.IntraRouteMoveType[] moveTypes = {LocalSearch.IntraRouteMoveType.TWO_EDGES_EXCHANGE};
+        boolean[] startingSolutions = {true}; // true for random, false for greedy
 
         // Iterate over each input file
         for (File inputFile : inputFiles) {
@@ -635,7 +659,7 @@ public class Main {
             System.out.println("Total nodes: " + n + ", Selecting k=" + k + " nodes.\n");
 
             // Prepare output directory for this instance
-            String outputInstanceDirPath = "outputs/" + instanceName;
+            String outputInstanceDirPath = "C:\\Users\\wazus\\OneDrive\\Desktop\\Evolutionary Computation ALL\\outputs\\" + instanceName;
             File outputInstanceDir = new File(outputInstanceDirPath);
             if (!outputInstanceDir.exists()) {
                 boolean created = outputInstanceDir.mkdirs();
@@ -653,7 +677,7 @@ public class Main {
             for (LocalSearch.LocalSearchType searchType : searchTypes) {
                 for (LocalSearch.IntraRouteMoveType moveType : moveTypes) {
                     for (boolean isRandomStart : startingSolutions) {
-                        String methodName = searchType + "_" + moveType + "_" + (isRandomStart ? "RandomStart" : "GreedyStart");
+                        String methodName = searchType + "_" + moveType + "_" + "RandomStart";
                         methodSolutions.put(methodName, new ArrayList<>());
 
                         System.out.println("Running method: " + methodName);
@@ -664,7 +688,7 @@ public class Main {
 
                         if (isRandomStart) {
                             // Use 200 random starting solutions
-                            for (int run = 0; run < 200; run++) {
+                            for (int run = 0; run < 1000; run++) {
                                 Solution initialSolution = randomHeuristic.generateSolution(instance, k, -1);
                                 Solution improvedSolution = localSearch.performLocalSearch(
                                         initialSolution, instance, searchType, moveType, searchType == LocalSearch.LocalSearchType.GREEDY);
@@ -672,7 +696,7 @@ public class Main {
                             }
                         } else {
                             // Use each node as starting node for greedy heuristic
-                            for (int startNode = 0; startNode < n && startNode < 200; startNode++) {
+                            for (int startNode = 0; startNode < n && startNode < 1000; startNode++) {
                                 Solution initialSolution = greedyHeuristic.generateSolution(instance, k, startNode);
                                 Solution improvedSolution = localSearch.performLocalSearch(
                                         initialSolution, instance, searchType, moveType, searchType == LocalSearch.LocalSearchType.GREEDY);
@@ -705,34 +729,15 @@ public class Main {
                 System.out.println("Best Solution Path: " + stats.getBestPath() + "\n");
 
                 // Save best path to CSV
-                String outputFileName = outputInstanceDirPath + "/" + methodName + ".csv";
+                String outputFileName = outputInstanceDirPath + "/" + methodName + "_all_solutions.csv";
                 try {
-                    saveBestPathToCSV(stats.getBestPath(), outputFileName);
-                    System.out.println("Best path saved to " + outputFileName + "\n");
+                    saveAllPathsToCSV(solutions, outputFileName);
+                    System.out.println("All solutions saved to " + outputFileName + "\n");
                 } catch (IOException e) {
-                    System.err.println("Error writing best path to CSV for method '" + methodName + "': " + e.getMessage());
+                    System.err.println("Error writing solutions to CSV for method '" + methodName + "': " + e.getMessage());
                 }
             }
             System.out.println("Finished processing instance: " + instanceName + "\n");
         }
-    }
-
-    /**
-     * Saves the best path to a CSV file, with each node index on a separate line.
-     * The first node is appended at the end to complete the cycle.
-     * @param bestPath List of node indices representing the best path
-     * @param fileName The name of the output CSV file
-     * @throws IOException If file writing fails
-     */
-    private static void saveBestPathToCSV(List<Integer> bestPath, String fileName) throws IOException {
-        BufferedWriter writer = new BufferedWriter(new FileWriter(fileName));
-        for (Integer node : bestPath) {
-            writer.write(node.toString());
-            writer.newLine();
-        }
-        if (!bestPath.isEmpty()) {
-            writer.write(bestPath.getFirst().toString());
-        }
-        writer.close();
     }
 }
