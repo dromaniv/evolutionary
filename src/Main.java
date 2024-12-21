@@ -120,94 +120,126 @@ abstract class Heuristic {
 }
 
 /**
- * A single "groundbreakingly better" class: Adaptive Large Neighborhood Search (ALNS)
- * with integrated local search and partial global memory.
+ * A more advanced ALNS variant (v2) with:
+ *  - Shaw Removal (relatedness-based) in addition to random/cost/distance
+ *  - Multiple insertion operators (Weighted Regret, Cheapest Insertion)
+ *  - Adaptive fraction of removal
+ *  - 3-opt local search enhancements
  */
-class AdaptiveLargeNeighborhoodSearch extends Heuristic {
+class AdvancedALNSv2 extends Heuristic {
 
-    private final int maxNoImprovement;   // # of iterations allowed with no improvement before diversification
-    private final double removalFraction; // fraction of nodes to remove each iteration
-    private final int[] operatorScores;   // success score for each removal operator
-    private final int[] operatorAttempts; // usage count for each removal operator
-    private final List<RemovalOperator> removalOps; // available destruction ops
+    private final int maxNoImprovement;
+    private final double minRemovalFrac;
+    private final double maxRemovalFrac;
+
+    // Removal operators
+    private final List<RemovalOperator> removalOps;
+    private final int[] removalScores;
+    private final int[] removalAttempts;
+
+    // Insertion operators
+    private final List<InsertionOperator> insertionOps;
+    private final int[] insertionScores;
+    private final int[] insertionAttempts;
 
     /**
-     * Constructor. You can tune the fraction removed or no-improvement threshold.
+     * Constructor.
+     *
+     * @param maxNoImprovement how many iterations with no improvement before a random shuffle
+     * @param minRemovalFrac   minimum fraction of nodes to remove
+     * @param maxRemovalFrac   maximum fraction of nodes to remove
      */
-    public AdaptiveLargeNeighborhoodSearch(int maxNoImprovement, double removalFraction) {
+    public AdvancedALNSv2(int maxNoImprovement, double minRemovalFrac, double maxRemovalFrac) {
         this.maxNoImprovement = maxNoImprovement;
-        this.removalFraction = removalFraction;
+        this.minRemovalFrac = minRemovalFrac;
+        this.maxRemovalFrac = maxRemovalFrac;
 
-        // We'll define multiple removal operators below
+        // Initialize removal operators
         removalOps = new ArrayList<>();
         removalOps.add(new RandomRemoval());
         removalOps.add(new DistanceRemoval());
         removalOps.add(new CostRemoval());
+        removalOps.add(new ShawRemoval());  // new “relatedness” removal
 
-        // Initialize scores and attempts for each operator
-        operatorScores = new int[removalOps.size()];
-        operatorAttempts = new int[removalOps.size()];
+        removalScores = new int[removalOps.size()];
+        removalAttempts = new int[removalOps.size()];
+
+        // Initialize insertion operators
+        insertionOps = new ArrayList<>();
+        insertionOps.add(new WeightedRegretInsertion());
+        insertionOps.add(new CheapestInsertion());
+
+        insertionScores = new int[insertionOps.size()];
+        insertionAttempts = new int[insertionOps.size()];
     }
 
     /**
-     * Runs ALNS within a given time limit (ms). We'll do multiple iterations, adaptively
-     * choosing removal operators, doing a "repair," local search, and updating the best solution.
+     * Executes ALNS within a given time limit (ms).
      */
     public Solution run(ProblemInstance instance, int k, double maxTimeMs) {
         long startTime = System.nanoTime();
-        long maxDuration = (long) (maxTimeMs * 1e6);
+        long maxDuration = (long)(maxTimeMs * 1e6);
 
-        // 1) Create an initial solution at random (k selected nodes)
+        // 1) Create an initial random solution
         int[] initPath = generateRandomPath(k, instance.nodes.length);
         int initObj = computeObjective(initPath, instance);
         Solution bestSol = new Solution(initPath, initObj);
 
-        // 2) Keep a current working solution
+        // 2) Current solution
         int[] currPath = Arrays.copyOf(initPath, initPath.length);
         int currObj = initObj;
 
-        // 3) To track no-improvement stretch
-        int iterSinceImprovement = 0;
+        int iterationSinceImprovement = 0;
 
-        // 4) Main loop until time is up
-        while (System.nanoTime() - startTime < maxDuration) {
-            // (a) Pick a removal operator using a roulette-wheel selection
+        while ((System.nanoTime() - startTime) < maxDuration) {
+            // (a) Decide how many nodes to remove this iteration (adaptive fraction)
+            double alpha = random.nextDouble(); // random in [0,1]
+            double removalFrac = minRemovalFrac + alpha * (maxRemovalFrac - minRemovalFrac);
+            int removalCount = (int) Math.max(1, Math.floor(removalFrac * currPath.length));
+
+            // (b) Pick removal & insertion operators via roulette selection
             RemovalOperator chosenRemovalOp = selectRemovalOperator();
+            InsertionOperator chosenInsertionOp = selectInsertionOperator();
 
-            // (b) Destroy: remove a fraction of nodes from currPath
-            int[] destroyedPath = removeNodes(currPath, instance, chosenRemovalOp);
+            // (c) Destroy
+            int[] partial = removeNodes(currPath, instance, chosenRemovalOp, removalCount);
 
-            // (c) Repair: re-insert them using Weighted Regret
-            int[] repairedPath = repairPath(destroyedPath, instance, k);
+            // (d) Repair
+            int[] repaired = chosenInsertionOp.insert(partial, instance, k);
 
-            // (d) Local Search intensification
-            int[] improvedPath = localSearch(repairedPath, instance);
-            int improvedObj = computeObjective(improvedPath, instance);
+            // (e) Local Search (with 2-opt & partial 3-opt)
+            int[] improved = localSearch(repaired, instance);
+            int improvedObj = computeObjective(improved, instance);
 
-            // (e) Evaluate
-            operatorAttempts[removalOps.indexOf(chosenRemovalOp)]++;
+            // track usage of these operators
+            int rIndex = removalOps.indexOf(chosenRemovalOp);
+            int iIndex = insertionOps.indexOf(chosenInsertionOp);
+            removalAttempts[rIndex]++;
+            insertionAttempts[iIndex]++;
+
+            // (f) Acceptance
             if (improvedObj < currObj) {
-                // accept new current solution
-                currPath = improvedPath;
+                // update current solution
+                currPath = improved;
                 currObj = improvedObj;
-
-                // give some reward to chosen operator
-                operatorScores[removalOps.indexOf(chosenRemovalOp)] += 3; // e.g. reward 3 for improvement
+                // reward
+                removalScores[rIndex] += 3;
+                insertionScores[iIndex] += 3;
             }
 
-            // (f) If better than global best, record
+            // check if we found a global best
             if (currObj < bestSol.objectiveValue) {
                 bestSol = new Solution(currPath, currObj);
-                iterSinceImprovement = 0;
+                iterationSinceImprovement = 0;
             } else {
-                iterSinceImprovement++;
+                iterationSinceImprovement++;
             }
 
-            // (g) If too long without improvement, do a random shuffle of curr
-            if (iterSinceImprovement > maxNoImprovement) {
+            // (g) If we exceed no improvement, random shuffle
+            if (iterationSinceImprovement > maxNoImprovement) {
                 randomShuffle(currPath);
                 currObj = computeObjective(currPath, instance);
-                iterSinceImprovement = 0;
+                iterationSinceImprovement = 0;
             }
         }
 
@@ -215,75 +247,20 @@ class AdaptiveLargeNeighborhoodSearch extends Heuristic {
     }
 
     /**
-     * Selects a removal operator using weighted probabilities based on success scores.
-     */
-    private RemovalOperator selectRemovalOperator() {
-        double[] probabilities = new double[removalOps.size()];
-        double sumScores = 0.0;
-        for (int i = 0; i < removalOps.size(); i++) {
-            double ratio = (operatorAttempts[i] == 0) ? 1.0 : ((double) operatorScores[i] / operatorAttempts[i]);
-            probabilities[i] = ratio;
-            sumScores += ratio;
-        }
-        // normalize
-        for (int i = 0; i < probabilities.length; i++) {
-            probabilities[i] /= sumScores;
-        }
-        // random selection
-        double r = random.nextDouble();
-        double cum = 0.0;
-        for (int i = 0; i < probabilities.length; i++) {
-            cum += probabilities[i];
-            if (r <= cum) {
-                return removalOps.get(i);
-            }
-        }
-        return removalOps.get(probabilities.length - 1); // fallback
-    }
-
-    /**
-     * Removes 'removalFraction * path.length' nodes from the path using chosen removal operator
-     */
-    private int[] removeNodes(int[] path, ProblemInstance instance, RemovalOperator op) {
-        // Make a copy of the path as a list to remove from
-        List<Integer> nodeList = Arrays.stream(path).boxed().collect(Collectors.toList());
-        int removalCount = (int) Math.max(1, Math.floor(removalFraction * nodeList.size()));
-        // We'll track removed nodes in a separate list
-        List<Integer> removed = op.selectNodesToRemove(nodeList, removalCount, instance);
-        // Actually remove them
-        nodeList.removeAll(removed);
-        return nodeList.stream().mapToInt(Integer::intValue).toArray();
-    }
-
-    /**
-     * Repairs a partially destroyed solution (the 'destroyedPath') back to 'k' nodes
-     * using Weighted Regret Insertion, reusing the approach from your previous code.
-     */
-    private int[] repairPath(int[] destroyedPath, ProblemInstance instance, int k) {
-        GreedyWeightedRegret regret = new GreedyWeightedRegret();
-        List<Integer> partialPath = Arrays.stream(destroyedPath).boxed().collect(Collectors.toList());
-        Set<Integer> selected = new HashSet<>(partialPath);
-        return regret.generateSolution(instance, partialPath, selected, k).path;
-    }
-
-    /**
-     * Applies local search to the repaired path. Uses 2-opt and single-node swap for intensification.
+     * Local Search with 2-opt and a partial 3-opt approach.
      */
     private int[] localSearch(int[] path, ProblemInstance instance) {
-        boolean improved = true;
         int[] bestPath = Arrays.copyOf(path, path.length);
         int bestObj = computeObjective(bestPath, instance);
+        boolean improved = true;
 
         while (improved) {
             improved = false;
-
-            // 1) 2-opt moves
+            // 1) 2-opt
             for (int i = 0; i < bestPath.length; i++) {
                 for (int j = i + 2; j < bestPath.length; j++) {
-                    if (i == 0 && j == bestPath.length - 1) {
-                        continue; // do not reverse entire route
-                    }
-                    int delta = evaluate2OptDelta(instance, bestPath, i, j);
+                    if (i == 0 && j == bestPath.length - 1) continue;
+                    int delta = evaluate2OptDelta(bestPath, i, j, instance.distanceMatrix);
                     if (delta < 0) {
                         apply2Opt(bestPath, i, j);
                         bestObj += delta;
@@ -292,24 +269,20 @@ class AdaptiveLargeNeighborhoodSearch extends Heuristic {
                 }
             }
 
-            // 2) Single-node swap with outside (like inter-route)
-            // But we must pick a node from the path to swap with a node not in the path
-            // We'll do a few random attempts
-            Set<Integer> inPath = Arrays.stream(bestPath).boxed().collect(Collectors.toSet());
-            int tries = 0;
-            while (tries < 10) {
-                tries++;
-                int pos = random.nextInt(bestPath.length);
-                int oldNode = bestPath[pos];
-                int newNode = random.nextInt(instance.nodes.length);
-                if (inPath.contains(newNode)) {
-                    continue;
-                }
-                int delta = evaluateNodeSwapDelta(instance, bestPath, pos, newNode);
+            // 2) Partial 3-opt: randomly pick a few triplets (i < j < k), attempt a standard 3-opt
+            //   (We won't do a full 3-opt everywhere, just a few random picks to save time)
+            for (int attempt = 0; attempt < 5; attempt++) {
+                int i = random.nextInt(bestPath.length);
+                int j = random.nextInt(bestPath.length);
+                int k = random.nextInt(bestPath.length);
+                if (i > j) {int t = i; i=j; j=t;}
+                if (j > k) {int t=j; j=k; k=t;}
+                if (i > j) {int t=i; i=j; j=t;} // recheck
+                if (k - i < 3) continue; // skip too short segments
+
+                int delta = evaluate3OptDelta(bestPath, i, j, k, instance.distanceMatrix);
                 if (delta < 0) {
-                    bestPath[pos] = newNode;
-                    inPath.remove(oldNode);
-                    inPath.add(newNode);
+                    apply3Opt(bestPath, i, j, k);
                     bestObj += delta;
                     improved = true;
                 }
@@ -318,54 +291,118 @@ class AdaptiveLargeNeighborhoodSearch extends Heuristic {
         return bestPath;
     }
 
-    /**
-     * Evaluates the delta in cost for a 2-opt on edges (i, i+1) and (j, j+1).
-     */
-    private int evaluate2OptDelta(ProblemInstance instance, int[] path, int i, int j) {
-        int[][] dist = instance.distanceMatrix;
-        int n = path.length;
-        int a = path[i];
-        int b = path[(i + 1) % n];
-        int c = path[j];
-        int d = path[(j + 1) % n];
+    /** Evaluate 2-opt delta for edges (i,i+1) and (j,j+1). */
+    private int evaluate2OptDelta(int[] p, int i, int j, int[][] dist) {
+        int n = p.length;
+        int a = p[i];
+        int b = p[(i+1) % n];
+        int c = p[j];
+        int d = p[(j+1) % n];
         return -dist[a][b] - dist[c][d] + dist[a][c] + dist[b][d];
     }
 
-    private void apply2Opt(int[] path, int i, int j) {
-        int n = path.length;
-        // Reverse segment path[i+1..j]
-        int start = i+1, end = j;
+    /** Apply 2-opt: reverse segment p[i+1..j]. */
+    private void apply2Opt(int[] p, int i, int j) {
+        int n = p.length;
+        int start = i + 1;
+        int end = j;
         while (start < end) {
-            int temp = path[start];
-            path[start] = path[end];
-            path[end] = temp;
+            int tmp = p[start];
+            p[start] = p[end];
+            p[end] = tmp;
             start++;
             end--;
         }
     }
 
     /**
-     * Evaluates the cost difference if we swap the node at position 'pos' with 'newNode' not in the path.
-     * We'll remove oldNode from edges (pos-1, pos), (pos, pos+1) and add newNode in that position.
+     * Evaluate 3-opt delta for segments (i,i+1), (j,j+1), (k,k+1).
+     * We only check a single 3-opt pattern for demonstration (there are 8 ways in full 3-opt).
      */
-    private int evaluateNodeSwapDelta(ProblemInstance instance, int[] path, int pos, int newNode) {
-        int[][] dist = instance.distanceMatrix;
-        Node[] nodes = instance.nodes;
-        int oldNode = path[pos];
-        int n = path.length;
-        int prev = path[(pos - 1 + n) % n];
-        int next = path[(pos + 1) % n];
+    private int evaluate3OptDelta(int[] p, int i, int j, int k, int[][] dist) {
+        int n = p.length;
+        int a = p[i], b = p[(i+1)%n], c = p[j], d = p[(j+1)%n], e = p[k], f = p[(k+1)%n];
 
-        int oldEdges = dist[prev][oldNode] + dist[oldNode][next];
-        int newEdges = dist[prev][newNode] + dist[newNode][next];
-        int costDiff = nodes[newNode].cost - nodes[oldNode].cost;
+        // We'll do a simple pattern: remove (a,b), (c,d), (e,f), reconnect as (a,d)-(c,f)-(e,b)
+        // Typically you'd check multiple reconnection patterns for best improvement.
+        int oldCost = dist[a][b] + dist[c][d] + dist[e][f];
+        int newCost = dist[a][d] + dist[c][f] + dist[e][b];
+        return newCost - oldCost;
+    }
 
-        return -oldEdges + newEdges + costDiff;
+    /** Apply that single 3-opt pattern: segments: (a,b), (c,d), (e,f) => (a,d)-(c,f)-(e,b). */
+    private void apply3Opt(int[] p, int i, int j, int k) {
+        // For simplicity, we’ll do it with subarray reversals in a small-coded way:
+        // A real 3-opt code would systematically reorder the segments p[i+1..j], p[j+1..k], etc.
+        // We'll do a naive approach: rotate segments for the chosen pattern
+        reverseSegment(p, j+1, k);  // (c,d) => reversed
+        reverseSegment(p, i+1, j);  // (a,b) => reversed
+        // disclaim: This is a simplified example of one 3-opt pattern
+    }
+
+    private void reverseSegment(int[] p, int start, int end) {
+        while (start < end) {
+            int tmp = p[start];
+            p[start] = p[end];
+            p[end] = tmp;
+            start++;
+            end--;
+        }
     }
 
     /**
-     * Generate a random path of length k (i.e., select k distinct nodes).
+     * Removal & insertion operators
      */
+    private RemovalOperator selectRemovalOperator() {
+        double[] probabilities = computeOperatorProbabilities(removalScores, removalAttempts);
+        double r = random.nextDouble();
+        double cum = 0;
+        for (int i = 0; i < probabilities.length; i++) {
+            cum += probabilities[i];
+            if (r <= cum) {
+                return removalOps.get(i);
+            }
+        }
+        return removalOps.get(probabilities.length - 1);
+    }
+
+    private InsertionOperator selectInsertionOperator() {
+        double[] probabilities = computeOperatorProbabilities(insertionScores, insertionAttempts);
+        double r = random.nextDouble();
+        double cum = 0;
+        for (int i = 0; i < probabilities.length; i++) {
+            cum += probabilities[i];
+            if (r <= cum) {
+                return insertionOps.get(i);
+            }
+        }
+        return insertionOps.get(probabilities.length - 1);
+    }
+
+    private double[] computeOperatorProbabilities(int[] scores, int[] attempts) {
+        // Weighted by (score / attempts), fallback = 1 if attempts=0
+        double[] prob = new double[scores.length];
+        double sum = 0;
+        for (int i = 0; i < scores.length; i++) {
+            double ratio = (attempts[i] == 0) ? 1.0 : ((double)scores[i] / attempts[i]);
+            prob[i] = ratio;
+            sum += ratio;
+        }
+        // normalize
+        for (int i = 0; i < prob.length; i++) {
+            prob[i] /= sum;
+        }
+        return prob;
+    }
+
+    private int[] removeNodes(int[] path, ProblemInstance instance, RemovalOperator op, int removalCount) {
+        List<Integer> pathList = Arrays.stream(path).boxed().collect(Collectors.toList());
+        List<Integer> removed = op.selectNodesToRemove(pathList, removalCount, instance);
+        pathList.removeAll(removed);
+        return pathList.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    // Basic random path generator
     private int[] generateRandomPath(int k, int n) {
         List<Integer> allNodes = new ArrayList<>();
         for (int i = 0; i < n; i++) {
@@ -377,9 +414,6 @@ class AdaptiveLargeNeighborhoodSearch extends Heuristic {
         return chosen.stream().mapToInt(Integer::intValue).toArray();
     }
 
-    /**
-     * Simple random shuffle to "diversify" the path
-     */
     private void randomShuffle(int[] path) {
         for (int i = path.length - 1; i > 0; i--) {
             int idx = random.nextInt(i + 1);
@@ -390,121 +424,134 @@ class AdaptiveLargeNeighborhoodSearch extends Heuristic {
     }
 
     /**
-     * REMOVAL OPERATORS (Destruction)
+     * Removal Operators
      */
     private interface RemovalOperator {
         List<Integer> selectNodesToRemove(List<Integer> pathList, int removalCount, ProblemInstance instance);
     }
 
-    /**
-     * 1) Random Removal: remove random positions from the path
-     */
+    // 1) Random Removal
     private class RandomRemoval implements RemovalOperator {
         @Override
         public List<Integer> selectNodesToRemove(List<Integer> pathList, int removalCount, ProblemInstance instance) {
             List<Integer> removed = new ArrayList<>();
-            List<Integer> indices = new ArrayList<>();
-            for (int i = 0; i < pathList.size(); i++) indices.add(i);
-            Collections.shuffle(indices, random);
+            List<Integer> idxs = new ArrayList<>();
+            for (int i = 0; i < pathList.size(); i++) idxs.add(i);
+            Collections.shuffle(idxs, random);
             for (int i = 0; i < removalCount; i++) {
-                removed.add(pathList.get(indices.get(i)));
+                removed.add(pathList.get(idxs.get(i)));
             }
             return removed;
         }
     }
 
-    /**
-     * 2) Distance-based Removal: remove the most "centrally distant" nodes
-     *    (For example, pick a random pivot node, remove nodes that are far from pivot).
-     */
+    // 2) Distance-based removal
     private class DistanceRemoval implements RemovalOperator {
         @Override
         public List<Integer> selectNodesToRemove(List<Integer> pathList, int removalCount, ProblemInstance instance) {
             if (pathList.isEmpty()) return new ArrayList<>();
-            int pivotIndex = pathList.get(random.nextInt(pathList.size()));
-            // Sort nodes by distance from pivot
-            pathList.sort(Comparator.comparingInt(n -> -instance.distanceMatrix[pivotIndex][n]));
+            int pivot = pathList.get(random.nextInt(pathList.size()));
+            pathList.sort(Comparator.comparingInt(n -> -instance.distanceMatrix[pivot][n])); // descending distance
             return new ArrayList<>(pathList.subList(0, Math.min(removalCount, pathList.size())));
         }
     }
 
-    /**
-     * 3) Cost-based Removal: remove nodes with highest cost
-     */
+    // 3) Cost-based removal
     private class CostRemoval implements RemovalOperator {
         @Override
         public List<Integer> selectNodesToRemove(List<Integer> pathList, int removalCount, ProblemInstance instance) {
             List<Integer> copy = new ArrayList<>(pathList);
-            // Sort descending by node cost
-            copy.sort(Comparator.comparingInt(n -> -instance.nodes[n].cost));
+            copy.sort(Comparator.comparingInt(n -> -instance.nodes[n].cost)); // highest cost first
             return new ArrayList<>(copy.subList(0, Math.min(removalCount, copy.size())));
         }
     }
 
+    // 4) Shaw (Relatedness) Removal: remove nodes that are pairwise “close” in coordinate or cost
+    private class ShawRemoval implements RemovalOperator {
+        @Override
+        public List<Integer> selectNodesToRemove(List<Integer> pathList, int removalCount, ProblemInstance instance) {
+            if (pathList.isEmpty()) return new ArrayList<>();
+            // pick random “seed” node
+            int seedIndex = pathList.get(random.nextInt(pathList.size()));
+            // compute relatedness = combination of distance and cost difference
+            // higher => more related => more likely to remove
+            // for simplicity: relatedness = distance(seedIndex, n) + |cost(seedIndex) - cost(n)|
+            Map<Integer, Double> relatednessMap = new HashMap<>();
+            Node seed = instance.nodes[seedIndex];
+            for (int nd : pathList) {
+                Node ndN = instance.nodes[nd];
+                int dist = instance.distanceMatrix[seedIndex][nd];
+                double costDiff = Math.abs(seed.cost - ndN.cost);
+                double relatedness = dist + costDiff;
+                relatednessMap.put(nd, relatedness);
+            }
+            // sort ascending by relatedness so the "most related" are at the front
+            // we'll remove those that are "closest" to the seed
+            List<Integer> sorted = new ArrayList<>(pathList);
+            sorted.sort(Comparator.comparingDouble(relatednessMap::get));
+            return new ArrayList<>(sorted.subList(0, Math.min(removalCount, sorted.size())));
+        }
+    }
+
     /**
-     * REPAIR OPERATOR: Weighted Regret. Reuse from earlier code but minimized for clarity.
+     * Insertion Operators
      */
-    private static class GreedyWeightedRegret {
+    private interface InsertionOperator {
+        int[] insert(int[] partialPath, ProblemInstance instance, int k);
+    }
+
+    // Weighted Regret from before
+    private class WeightedRegretInsertion implements InsertionOperator {
         private final double w1 = 1.0;
         private final double w2 = 1.0;
 
-        public Solution generateSolution(ProblemInstance instance, List<Integer> partialPath,
-                                         Set<Integer> selected, int k) {
-            Node[] nodes = instance.nodes;
-            int n = nodes.length;
-            int[][] dist = instance.distanceMatrix;
-            List<Integer> path = new ArrayList<>(partialPath);
-
-            while (path.size() < k) {
+        @Override
+        public int[] insert(int[] partialPath, ProblemInstance instance, int k) {
+            List<Integer> pathList = Arrays.stream(partialPath).boxed().collect(Collectors.toList());
+            Set<Integer> used = new HashSet<>(pathList);
+            int n = instance.nodes.length;
+            while (pathList.size() < k) {
                 int bestNode = -1;
                 double bestWeighted = Double.NEGATIVE_INFINITY;
                 int bestPos = -1;
 
-                for (int node = 0; node < n; node++) {
-                    if (selected.contains(node)) continue;
-                    InsertionInfo info = findBestAndSecondBest(path, node, dist);
+                for (int nd = 0; nd < n; nd++) {
+                    if (used.contains(nd)) continue;
+                    InsertionInfo info = findBestAndSecondBest(pathList, nd, instance);
                     if (info == null) continue;
 
                     int regret = info.secondBest - info.best;
-                    double weightedVal = w1 * regret - w2 * (info.best + nodes[node].cost);
+                    double weightedVal = w1 * regret - w2*(info.best + instance.nodes[nd].cost);
                     if (weightedVal > bestWeighted) {
                         bestWeighted = weightedVal;
-                        bestNode = node;
+                        bestNode = nd;
                         bestPos = info.position;
                     }
                 }
-
-                if (bestNode != -1 && bestPos != -1) {
-                    path.add(bestPos, bestNode);
-                    selected.add(bestNode);
-                } else {
-                    // no more possible insertions
-                    break;
-                }
+                if (bestNode == -1) break;
+                pathList.add(bestPos, bestNode);
+                used.add(bestNode);
             }
-
-            int obj = computeObj(path.stream().mapToInt(i -> i).toArray(), instance);
-            return new Solution(path.stream().mapToInt(i -> i).toArray(), obj);
+            return pathList.stream().mapToInt(i->i).toArray();
         }
 
-        private InsertionInfo findBestAndSecondBest(List<Integer> path, int node, int[][] dist) {
+        private InsertionInfo findBestAndSecondBest(List<Integer> path, int node, ProblemInstance instance) {
             if (path.isEmpty()) {
-                // If path is empty, the cost increment is 0
                 return new InsertionInfo(0, 0, 0);
             }
+            int[][] dist = instance.distanceMatrix;
             int best = Integer.MAX_VALUE;
             int secondBest = Integer.MAX_VALUE;
             int bestPos = -1;
-            int size = path.size();
-            for (int i = 0; i < size; i++) {
-                int current = path.get(i);
-                int next = path.get((i + 1) % size);
-                int inc = dist[current][node] + dist[node][next] - dist[current][next];
-
+            int sz = path.size();
+            for (int i = 0; i < sz; i++) {
+                int curr = path.get(i);
+                int nxt = path.get((i+1) % sz);
+                int inc = dist[curr][node] + dist[node][nxt] - dist[curr][nxt];
                 if (inc < best) {
                     secondBest = best;
                     best = inc;
-                    bestPos = i + 1;
+                    bestPos = i+1;
                 } else if (inc < secondBest) {
                     secondBest = inc;
                 }
@@ -514,29 +561,68 @@ class AdaptiveLargeNeighborhoodSearch extends Heuristic {
             }
             return new InsertionInfo(bestPos, best, secondBest);
         }
+        private class InsertionInfo {
+            int position, best, secondBest;
+            InsertionInfo(int pos, int b, int sb) {
+                position = pos; best = b; secondBest = sb;
+            }
+        }
+    }
 
-        private int computeObj(int[] p, ProblemInstance instance) {
-            int sumDist = 0;
+    // Cheapest Insertion
+    private class CheapestInsertion implements InsertionOperator {
+        @Override
+        public int[] insert(int[] partialPath, ProblemInstance instance, int k) {
+            List<Integer> pathList = Arrays.stream(partialPath).boxed().collect(Collectors.toList());
+            Set<Integer> used = new HashSet<>(pathList);
+            int n = instance.nodes.length;
             int[][] dist = instance.distanceMatrix;
             Node[] nodes = instance.nodes;
-            for (int i = 0; i < p.length; i++) {
-                sumDist += dist[p[i]][p[(i+1)%p.length]];
+
+            while (pathList.size() < k) {
+                int bestNode = -1;
+                int bestCost = Integer.MAX_VALUE;
+                int bestPos = -1;
+
+                for (int nd = 0; nd < n; nd++) {
+                    if (used.contains(nd)) continue;
+                    // find insertion cost
+                    InsertionPos ip = findCheapestPos(pathList, nd, dist);
+                    if (ip.cost + nodes[nd].cost < bestCost) {
+                        bestCost = ip.cost + nodes[nd].cost;
+                        bestNode = nd;
+                        bestPos = ip.pos;
+                    }
+                }
+
+                if (bestNode == -1) break;
+                pathList.add(bestPos, bestNode);
+                used.add(bestNode);
             }
-            int sumCost = 0;
-            for (int nodeIndex : p) {
-                sumCost += nodes[nodeIndex].cost;
-            }
-            return sumDist + sumCost;
+            return pathList.stream().mapToInt(i->i).toArray();
         }
 
-        private static class InsertionInfo {
-            int position;
-            int best;
-            int secondBest;
-            public InsertionInfo(int position, int best, int secondBest) {
-                this.position = position;
-                this.best = best;
-                this.secondBest = secondBest;
+        private InsertionPos findCheapestPos(List<Integer> path, int node, int[][] dist) {
+            if (path.isEmpty()) return new InsertionPos(0, 0);
+            int best = Integer.MAX_VALUE;
+            int pos = -1;
+            int sz = path.size();
+            for (int i = 0; i < sz; i++) {
+                int curr = path.get(i);
+                int nxt = path.get((i+1)%sz);
+                int inc = dist[curr][node] + dist[node][nxt] - dist[curr][nxt];
+                if (inc < best) {
+                    best = inc;
+                    pos = i+1;
+                }
+            }
+            return new InsertionPos(pos, best);
+        }
+
+        private class InsertionPos {
+            int pos, cost;
+            InsertionPos(int p, int c) {
+                pos = p; cost = c;
             }
         }
     }
@@ -545,22 +631,22 @@ class AdaptiveLargeNeighborhoodSearch extends Heuristic {
 /**
  * Utility class to compute statistics for a list of solutions.
  */
-class StatisticsHelper {
+class Statistics {
     final int minObjective;
     final int maxObjective;
     final double avgObjective;
     final int[] bestPath;
 
-    StatisticsHelper(int minObjective, int maxObjective, double avgObjective, int[] bestPath) {
+    Statistics(int minObjective, int maxObjective, double avgObjective, int[] bestPath) {
         this.minObjective = minObjective;
         this.maxObjective = maxObjective;
         this.avgObjective = avgObjective;
         this.bestPath = bestPath;
     }
 
-    static StatisticsHelper computeStatistics(List<Solution> solutions) {
+    static Statistics computeStatistics(List<Solution> solutions) {
         if (solutions == null || solutions.isEmpty()) {
-            return new StatisticsHelper(0, 0, 0.0, new int[0]);
+            return new Statistics(0, 0, 0.0, new int[0]);
         }
         int min = Integer.MAX_VALUE;
         int max = Integer.MIN_VALUE;
@@ -578,15 +664,15 @@ class StatisticsHelper {
             sum += obj;
         }
         double avg = (double) sum / solutions.size();
-        return new StatisticsHelper(min, max, avg, bestPath);
+        return new Statistics(min, max, avg, bestPath);
     }
 }
 
 /**
- * Main class: processes each CSV instance, runs the single best ALNS method 20 times,
- * limited to ~870 ms each run, and outputs the results.
+ * Main: processes each CSV instance and runs the single AdvancedALNSv2 method 20 times,
+ * each with a ~870 ms time limit, logging results.
  */
-class AdaptiveLargeNeighborhoodSearchMain {
+class Main {
     public static void main(String[] args) {
         String inputDirPath = "inputs";
         File inputDir = new File(inputDirPath);
@@ -606,10 +692,9 @@ class AdaptiveLargeNeighborhoodSearchMain {
             return;
         }
 
-        // Required: keep time at ~870 ms
+        // We keep the ~870 ms limit
         double maxTimeMs = 870.0;
-
-        // We will do exactly 20 runs
+        // We do exactly 20 runs
         int runs = 20;
 
         for (File inputFile : inputFiles) {
@@ -635,23 +720,25 @@ class AdaptiveLargeNeighborhoodSearchMain {
                 System.out.println("No valid nodes in CSV file '" + fileName + "'. Skipping.");
                 continue;
             }
-            // pick half the nodes
+
+            // as before, select half the nodes
             int k = (int) Math.ceil(n / 2.0);
             System.out.println("Total nodes: " + n + ", Selecting k=" + k + " nodes.");
 
-            // Create single best method with chosen parameters
-            // For example:
-            int maxNoImprovement = 200;   // # of iterations with no improvement before a random shuffle
-            double removalFraction = 0.25; // fraction of nodes removed each iteration
+            // Build the single best ALNS with advanced features
+            // Example parameters:
+            int maxNoImprovement = 200;   // # iterations with no improvement
+            double minRemovalFrac = 0.15;
+            double maxRemovalFrac = 0.35;
 
-            AdaptiveLargeNeighborhoodSearch alns = new AdaptiveLargeNeighborhoodSearch(maxNoImprovement, removalFraction);
+            AdvancedALNSv2 alns = new AdvancedALNSv2(maxNoImprovement, minRemovalFrac, maxRemovalFrac);
 
-            // We'll collect the solutions
+            // Collect solutions
             List<Solution> solutions = new ArrayList<>();
 
             for (int run = 0; run < runs; run++) {
                 long startTime = System.nanoTime();
-                // run ALNS
+                // run advanced ALNS
                 Solution sol = alns.run(instance, k, maxTimeMs);
                 long endTime = System.nanoTime();
                 double durationMs = (endTime - startTime) / 1e6;
@@ -660,7 +747,7 @@ class AdaptiveLargeNeighborhoodSearchMain {
             }
 
             // Compute stats
-            StatisticsHelper stats = StatisticsHelper.computeStatistics(solutions);
+            Statistics stats = Statistics.computeStatistics(solutions);
 
             System.out.println("\n--- Results for " + instanceName + " ---");
             System.out.println("Best Obj: " + stats.minObjective);
@@ -668,11 +755,11 @@ class AdaptiveLargeNeighborhoodSearchMain {
             System.out.printf("Avg Obj: %.2f%n", stats.avgObjective);
             System.out.println("Best Path: " + Arrays.toString(stats.bestPath));
 
-            // Optionally save best path to CSV
+            // Save the best path
             String outputDirPath = "outputs/" + instanceName;
             File outDir = new File(outputDirPath);
             if (!outDir.exists()) outDir.mkdirs();
-            String bestPathFile = outputDirPath + "/ALNS_BestPath.csv";
+            String bestPathFile = outputDirPath + "/AdvancedALNSv2_BestPath.csv";
             try {
                 saveBestPathToCSV(stats.bestPath, bestPathFile);
                 System.out.println("Best path saved to: " + bestPathFile + "\n");
@@ -684,7 +771,7 @@ class AdaptiveLargeNeighborhoodSearchMain {
     }
 
     /**
-     * Saves the best path to a CSV file, each node on a new line, repeating the first node at the end.
+     * Saves the best path to a CSV file, each node on a new line, optionally repeating the first node at the end.
      */
     private static void saveBestPathToCSV(int[] bestPath, String fileName) throws IOException {
         BufferedWriter writer = new BufferedWriter(new FileWriter(fileName));
@@ -692,7 +779,6 @@ class AdaptiveLargeNeighborhoodSearchMain {
             writer.write(Integer.toString(node));
             writer.newLine();
         }
-        // optionally close the cycle
         if (bestPath.length > 0) {
             writer.write(Integer.toString(bestPath[0]));
             writer.newLine();
