@@ -120,13 +120,13 @@ abstract class Heuristic {
 }
 
 /**
- * A more advanced ALNS variant (v2) with:
+ * A more advanced ALNS variant with:
  *  - Shaw Removal (relatedness-based) in addition to random/cost/distance
  *  - Multiple insertion operators (Weighted Regret, Cheapest Insertion)
  *  - Adaptive fraction of removal
  *  - 3-opt local search enhancements
  */
-class AdvancedALNSv2 extends Heuristic {
+class EALNS extends Heuristic {
 
     private final int maxNoImprovement;
     private final double minRemovalFrac;
@@ -149,7 +149,7 @@ class AdvancedALNSv2 extends Heuristic {
      * @param minRemovalFrac   minimum fraction of nodes to remove
      * @param maxRemovalFrac   maximum fraction of nodes to remove
      */
-    public AdvancedALNSv2(int maxNoImprovement, double minRemovalFrac, double maxRemovalFrac) {
+    public EALNS(int maxNoImprovement, double minRemovalFrac, double maxRemovalFrac) {
         this.maxNoImprovement = maxNoImprovement;
         this.minRemovalFrac = minRemovalFrac;
         this.maxRemovalFrac = maxRemovalFrac;
@@ -159,7 +159,7 @@ class AdvancedALNSv2 extends Heuristic {
         removalOps.add(new RandomRemoval());
         removalOps.add(new DistanceRemoval());
         removalOps.add(new CostRemoval());
-        removalOps.add(new ShawRemoval());  // new “relatedness” removal
+        removalOps.add(new ShawRemoval());
 
         removalScores = new int[removalOps.size()];
         removalAttempts = new int[removalOps.size()];
@@ -669,7 +669,7 @@ class Statistics {
 }
 
 /**
- * Main: processes each CSV instance and runs the single AdvancedALNSv2 method 20 times,
+ * Main: processes each CSV instance and runs the single EALNS method 20 times,
  * each with a ~870 ms time limit, logging results.
  */
 class Main {
@@ -731,7 +731,7 @@ class Main {
             double minRemovalFrac = 0.15;
             double maxRemovalFrac = 0.35;
 
-            AdvancedALNSv2 alns = new AdvancedALNSv2(maxNoImprovement, minRemovalFrac, maxRemovalFrac);
+            EALNS alns = new EALNS(maxNoImprovement, minRemovalFrac, maxRemovalFrac);
 
             // Collect solutions
             List<Solution> solutions = new ArrayList<>();
@@ -759,7 +759,7 @@ class Main {
             String outputDirPath = "outputs/" + instanceName;
             File outDir = new File(outputDirPath);
             if (!outDir.exists()) outDir.mkdirs();
-            String bestPathFile = outputDirPath + "/AdvancedALNSv2_BestPath.csv";
+            String bestPathFile = outputDirPath + "/EALNS.csv";
             try {
                 saveBestPathToCSV(stats.bestPath, bestPathFile);
                 System.out.println("Best path saved to: " + bestPathFile + "\n");
