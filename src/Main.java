@@ -124,14 +124,6 @@ abstract class Heuristic {
  */
 class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
 
-    /**
-     * Generates a solution using local search with a maximum number of iterations.
-     *
-     * @param instance      The problem instance
-     * @param initialPath   The initial path to start from
-     * @param maxIterations Maximum number of iterations to perform
-     * @return A Solution object
-     */
     public Solution generateSolutionFromPath(ProblemInstance instance, int[] initialPath, int maxIterations) {
         int[] currentPath = Arrays.copyOf(initialPath, initialPath.length);
 
@@ -156,21 +148,16 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
             while (iterator.hasNext()) {
                 Move move = iterator.next();
                 if (!move.isValid(currentPath, inPathSet)) {
-                    // Situation 1: Edges no longer exist; remove move from improvingMoves
                     iterator.remove();
                     continue;
                 }
 
                 int delta = move.computeDelta(currentPath, distanceMatrix, nodes);
                 if (delta < 0) {
-                    // Situation 3: Edges exist in the same orientation; apply move and remove from improvingMoves
                     move.apply(currentPath, inPathSet);
                     improvement = true;
                     iterator.remove();
-                    break; // Apply one move at a time
-                } else {
-                    // Situation 2: Edges exist but do not lead to improvement; keep move in improvingMoves
-                    continue;
+                    break;
                 }
             }
 
@@ -178,7 +165,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
                 continue;
             }
 
-            // If no improvement from previous moves, explore full neighborhood
+            // If no improvement from previous moves, explore the full neighborhood
             int bestDelta = 0;
             Move bestMove = null;
 
@@ -189,7 +176,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
                 int b = currentPath[(i + 1) % nPath];
                 for (int j = i + 2; j < nPath; j++) {
                     if (i == 0 && j == nPath - 1) {
-                        continue; // Do not reverse the entire tour
+                        continue; // do not reverse the entire path
                     }
 
                     int c = currentPath[j];
@@ -217,7 +204,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
 
                 for (int v = 0; v < n; v++) {
                     if (inPathSet[v]) {
-                        continue; // v is already in the path
+                        continue;
                     }
 
                     int distPrevV = distanceMatrix[prev][v];
@@ -235,7 +222,6 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
             }
 
             if (bestMove != null) {
-                // Apply best move
                 bestMove.apply(currentPath, inPathSet);
                 improvement = true;
                 improvingMoves.clear();
@@ -247,14 +233,6 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
         return new Solution(currentPath, objective);
     }
 
-    /**
-     * Generates a random initial solution and then applies local search.
-     *
-     * @param instance      The problem instance
-     * @param k             Number of nodes to select
-     * @param maxIterations Maximum iterations for local search
-     * @return A Solution object
-     */
     public Solution generateSolution(ProblemInstance instance, int k, int maxIterations) {
         Node[] nodes = instance.nodes;
         int n = nodes.length;
@@ -263,7 +241,6 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
             allNodes[i] = i;
         }
 
-        // Start with a random solution
         shuffleArray(allNodes);
         int[] currentPath = Arrays.copyOfRange(allNodes, 0, k);
         shuffleArray(currentPath);
@@ -281,16 +258,16 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
         }
     }
 
+    /**
+     * Inner class representing a move in local search.
+     */
     private static class Move {
         int index1;
         int index2;
         MoveType type;
 
-        // For intra-route moves
         int nodeA, nodeB, nodeC, nodeD;
-
-        // For inter-route moves
-        int nodeU; // Original node at index1
+        int nodeU;
 
         Move() {
         }
@@ -316,22 +293,21 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
             this.nodeD = nodeD;
         }
 
-        void setInterRouteMove(int index1, int index2, int nodeU) {
+        void setInterRouteMove(int index1, int nodeV, int nodeU) {
             this.index1 = index1;
-            this.index2 = index2;
-            this.type = MoveType.INTER_ROUTE;
             this.nodeU = nodeU;
+            this.type = MoveType.INTER_ROUTE;
+            // nodeV is the node to be inserted
+            this.nodeA = nodeV; // Reusing nodeA to store nodeV
         }
 
         boolean isValid(int[] path, boolean[] inPathSet) {
             if (type == MoveType.INTRA_ROUTE) {
                 int nPath = path.length;
-                // Check if the nodes involved are still the same
                 return path[index1] == nodeA && path[(index1 + 1) % nPath] == nodeB &&
                         path[index2] == nodeC && path[(index2 + 1) % nPath] == nodeD;
             } else if (type == MoveType.INTER_ROUTE) {
-                // Check if the node at index1 is still nodeU and index2 is not in the path
-                return path[index1] == nodeU && !inPathSet[index2];
+                return path[index1] == nodeU && !inPathSet[nodeA];
             }
             return false;
         }
@@ -350,7 +326,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
             } else if (type == MoveType.INTER_ROUTE) {
                 int n = path.length;
                 int u = path[index1];
-                int v = index2;
+                int v = nodeA;
                 int prev = path[(index1 - 1 + n) % n];
                 int next = path[(index1 + 1) % n];
 
@@ -374,7 +350,7 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
             } else if (type == MoveType.INTER_ROUTE) {
                 int i = index1;
                 int u = path[i];
-                int v = index2;
+                int v = nodeA;
 
                 path[i] = v;
                 inPathSet[u] = false;
@@ -402,72 +378,19 @@ class SteepestLocalSearchWithMoveEvaluation extends Heuristic {
 
 /**
  * Implements the Greedy Weighted Regret heuristic for solution construction (repair).
- * It uses a weighted combination of the regret value and the best increase.
  */
 class GreedyWeightedRegret extends Heuristic {
-    private final double w1; // Weight for regret
-    private final double w2; // Weight for best increase
+    private final double w1;
+    private final double w2;
 
     public GreedyWeightedRegret() {
         this.w1 = 1;
         this.w2 = 1;
     }
 
-    public GreedyWeightedRegret(double w1, double w2) {
-        this.w1 = w1;
-        this.w2 = w2;
-    }
-
-    public Solution generateSolution(ProblemInstance instance, List<Integer> partialPath, Set<Integer> selected, int k) {
-        // partialPath: currently constructed partial solution
-        // selected: set of already selected nodes
-        // k: target number of nodes in the solution
-        Node[] nodes = instance.nodes;
-        int n = nodes.length;
-        int[][] distanceMatrix = instance.distanceMatrix;
-        List<Integer> path = new ArrayList<>(partialPath);
-
-        while (path.size() < k) {
-            int bestNode = -1;
-            double bestWeightedValue = Double.NEGATIVE_INFINITY;
-            int bestInsertionPosition = -1;
-
-            for (int node = 0; node < n; node++) {
-                if (selected.contains(node)) {
-                    continue;
-                }
-                InsertionInfo insertionInfo = findBestAndSecondBestInsertion(path, node, distanceMatrix);
-
-                if (insertionInfo == null) {
-                    continue;
-                }
-
-                int regretValue = insertionInfo.secondBestIncrease - insertionInfo.bestIncrease;
-                double weightedValue = w1 * regretValue - w2 * (insertionInfo.bestIncrease + nodes[node].cost);
-
-                if (weightedValue > bestWeightedValue) {
-                    bestWeightedValue = weightedValue;
-                    bestNode = node;
-                    bestInsertionPosition = insertionInfo.position;
-                }
-            }
-
-            if (bestNode != -1 && bestInsertionPosition != -1) {
-                path.add(bestInsertionPosition, bestNode);
-                selected.add(bestNode);
-            } else {
-                // No more nodes can be added
-                break;
-            }
-        }
-
-        int objective = computeObjective(path.stream().mapToInt(Integer::intValue).toArray(), instance);
-        return new Solution(path.stream().mapToInt(Integer::intValue).toArray(), objective);
-    }
-
     protected InsertionInfo findBestAndSecondBestInsertion(List<Integer> path, int nodeToInsert, int[][] distanceMatrix) {
         if (path.isEmpty()) {
-            return new InsertionInfo(0,0,0);
+            return new InsertionInfo(0, 0, 0);
         }
 
         int bestIncrease = Integer.MAX_VALUE;
@@ -489,12 +412,53 @@ class GreedyWeightedRegret extends Heuristic {
             }
         }
 
-        // If we never found a second best, set it equal to best
         if (secondBestIncrease == Integer.MAX_VALUE) {
             secondBestIncrease = bestIncrease;
         }
 
         return new InsertionInfo(bestPos, bestIncrease, secondBestIncrease);
+    }
+
+    public Solution generateSolution(ProblemInstance instance, List<Integer> partialPath, Set<Integer> selected, int k) {
+        Node[] nodes = instance.nodes;
+        int n = nodes.length;
+        int[][] distanceMatrix = instance.distanceMatrix;
+        List<Integer> path = new ArrayList<>(partialPath);
+
+        while (path.size() < k) {
+            int bestNode = -1;
+            double bestWeightedValue = Double.NEGATIVE_INFINITY;
+            int bestInsertionPosition = -1;
+
+            for (int node = 0; node < n; node++) {
+                if (selected.contains(node)) {
+                    continue;
+                }
+                InsertionInfo insertionInfo = findBestAndSecondBestInsertion(path, node, distanceMatrix);
+                if (insertionInfo == null)
+                    continue;
+
+                int regretValue = insertionInfo.secondBestIncrease - insertionInfo.bestIncrease;
+                double weightedValue = w1 * regretValue - w2 * (insertionInfo.bestIncrease + nodes[node].cost);
+
+                if (weightedValue > bestWeightedValue) {
+                    bestWeightedValue = weightedValue;
+                    bestNode = node;
+                    bestInsertionPosition = insertionInfo.position;
+                }
+            }
+
+            if (bestNode != -1 && bestInsertionPosition != -1) {
+                path.add(bestInsertionPosition, bestNode);
+                selected.add(bestNode);
+            } else {
+                // No more nodes to add
+                break;
+            }
+        }
+
+        int objective = computeObjective(path.stream().mapToInt(Integer::intValue).toArray(), instance);
+        return new Solution(path.stream().mapToInt(Integer::intValue).toArray(), objective);
     }
 
     protected static class InsertionInfo {
@@ -511,110 +475,322 @@ class GreedyWeightedRegret extends Heuristic {
 }
 
 /**
- * Large Neighborhood Search (LNS) implementation.
- * The LNS algorithm:
- * 1. Generate an initial solution x (random)
- * 2. x := Local search(x) (optional)
- * 3. Repeat until time/iteration limits:
- *    a. y := Destroy(x) (remove a large fraction of nodes)
- *    b. y := Repair(y) using GreedyWeightedRegret
- *    c. y := Local search(y) (optional, depending on version)
- *    d. If f(y) > f(x) then x := y
+ * Implements a Hybrid Evolutionary Algorithm (HEA).
  */
-class LargeNeighborhoodSearch extends Heuristic {
+class HybridEvolutionaryAlgorithm extends Heuristic {
+
     private final ProblemInstance instance;
     private final int k;
     private final double maxTimeMs;
-    private final boolean applyLocalSearchEachIteration;
-    private final double destroyFraction = 0.25; // remove about 20-30%
-    private final GreedyWeightedRegret repairHeuristic;
+    private final int populationSize = 20;  // Elite population of 20
+    private final boolean applyLocalSearchToOffspring;
     private final SteepestLocalSearchWithMoveEvaluation localSearch;
+    private final GreedyWeightedRegret repairHeuristic;
+    private final Random rand = new Random();
 
-    public int numIterations;
+    public int numIterations; // number of iterations performed
 
-    public LargeNeighborhoodSearch(ProblemInstance instance, int k, double maxTimeMs, boolean applyLocalSearchEachIteration) {
+    /**
+     * Constructor.
+     *
+     * @param instance                    Problem instance
+     * @param k                           Number of nodes in the solution
+     * @param maxTimeMs                   Maximum time in milliseconds
+     * @param applyLocalSearchToOffspring Whether to apply local search after each recombination
+     */
+    public HybridEvolutionaryAlgorithm(ProblemInstance instance, int k, double maxTimeMs,
+                                       boolean applyLocalSearchToOffspring) {
         this.instance = instance;
         this.k = k;
         this.maxTimeMs = maxTimeMs;
-        this.applyLocalSearchEachIteration = applyLocalSearchEachIteration;
-        this.repairHeuristic = new GreedyWeightedRegret();
+        this.applyLocalSearchToOffspring = applyLocalSearchToOffspring;
         this.localSearch = new SteepestLocalSearchWithMoveEvaluation();
+        this.repairHeuristic = new GreedyWeightedRegret();
     }
 
+    /**
+     * Runs the hybrid evolutionary algorithm.
+     *
+     * @return The best solution found.
+     */
     public Solution run() {
         long startTime = System.nanoTime();
-        long maxDuration = (long) (maxTimeMs * 1e6); // Convert ms to ns
+        long maxDuration = (long) (maxTimeMs * 1e6); // ms to ns
 
-        // 1. Generate initial solution (random)
+        // 1. Generate initial population (apply local search for each individual).
+        List<Solution> population = initializePopulation();
+
+        // 2. Keep track of the best solution found so far.
+        Solution bestSolution = findBest(population);
+
+        numIterations = 0;
+        while ((System.nanoTime() - startTime) < maxDuration) {
+            numIterations++;
+
+            // 3. Select parents with uniform probability from the population
+            Solution parent1 = population.get(rand.nextInt(population.size()));
+            Solution parent2 = population.get(rand.nextInt(population.size()));
+
+            // 4. Apply recombination to produce a single offspring
+            Solution offspring = recombine(parent1, parent2);
+
+            // 5. Optionally apply local search on the offspring
+            if (applyLocalSearchToOffspring) {
+                offspring = localSearch.generateSolutionFromPath(instance, offspring.path, Integer.MAX_VALUE);
+            }
+
+            // 6. Insert offspring into population if it is not a duplicate
+            if (!isDuplicate(population, offspring)) {
+                replaceWorstSolution(population, offspring);
+                // Update best if offspring is better
+                if (offspring.objectiveValue < bestSolution.objectiveValue) {
+                    bestSolution = offspring;
+                }
+            }
+
+            // Termination condition based on time, so we continue until time is up.
+        }
+
+        return bestSolution;
+    }
+
+    /**
+     * Generates the initial population by randomly creating solutions
+     * and applying local search to each.
+     */
+    private List<Solution> initializePopulation() {
+        List<Solution> population = new ArrayList<>(populationSize);
         int n = instance.nodes.length;
         int[] allNodes = new int[n];
         for (int i = 0; i < n; i++) {
             allNodes[i] = i;
         }
-        shuffleArray(allNodes);
-        int[] currentPath = Arrays.copyOfRange(allNodes, 0, k);
-        shuffleArray(currentPath);
 
-        // 2. Apply local search to initial solution
-        Solution currentSol = localSearch.generateSolutionFromPath(instance, currentPath, Integer.MAX_VALUE);
+        // We generate 'populationSize' solutions
+        while (population.size() < populationSize) {
+            shuffleArray(allNodes);
+            // pick the first k nodes
+            int[] partialPath = Arrays.copyOfRange(allNodes, 0, k);
+            shuffleArray(partialPath);
 
-        // Main loop
-        numIterations = 0;
-        while ((System.nanoTime() - startTime) < maxDuration) {
-            numIterations++;
+            // local search on the random path
+            Solution sol = localSearch.generateSolutionFromPath(instance, partialPath, Integer.MAX_VALUE);
 
-            // a. Destroy current solution
-            Solution destroyed = destroy(currentSol);
-
-            // b. Repair solution using GreedyWeightedRegret
-            Solution repaired = repair(destroyed);
-
-            // c. Local search (optional)
-            if (applyLocalSearchEachIteration) {
-                repaired = localSearch.generateSolutionFromPath(instance, repaired.path, Integer.MAX_VALUE);
+            if (!isDuplicate(population, sol)) {
+                population.add(sol);
             }
+        }
+        return population;
+    }
 
-            // d. If better, accept
-            if (repaired.objectiveValue < currentSol.objectiveValue) {
-                currentSol = repaired;
+    /**
+     * Two recombination operators:
+     *   Operator 1: Common edges.
+     *   Operator 2: Remove from parent1 the edges not in parent2, then repair.
+     * We choose one of these operators randomly (50-50 probability).
+     *
+     * @param parent1 A solution
+     * @param parent2 Another solution
+     * @return Offspring solution
+     */
+    private Solution recombine(Solution parent1, Solution parent2) {
+        // Choose randomly between operator 1 and operator 2
+        if (rand.nextBoolean()) {
+            return recombineOperator1(parent1, parent2);
+        } else {
+            return recombineOperator2(parent1, parent2);
+        }
+    }
+
+    /**
+     * Recombination Operator 1:
+     *  - The offspring inherits all edges that appear in both parents.
+     *  - The rest of the nodes are added randomly until we have k nodes.
+     */
+    private Solution recombineOperator1(Solution parent1, Solution parent2) {
+        // Convert paths to sets of edges for quick membership check
+        Set<Edge> edgesParent1 = getEdgeSet(parent1.path);
+        Set<Edge> edgesParent2 = getEdgeSet(parent2.path);
+
+        // The common edges are the intersection
+        Set<Edge> commonEdges = new HashSet<>(edgesParent1);
+        commonEdges.retainAll(edgesParent2);
+
+        // Collect unique nodes from common edges
+        Set<Integer> nodesInEdges = new HashSet<>();
+        for (Edge e : commonEdges) {
+            nodesInEdges.add(e.u);
+            nodesInEdges.add(e.v);
+        }
+
+        List<Integer> nodeList = new ArrayList<>(nodesInEdges);
+        Collections.shuffle(nodeList, rand);
+
+        // If we already have more than k, we'll trim randomly
+        while (nodeList.size() > k) {
+            nodeList.remove(nodeList.size() - 1);
+        }
+
+        // If we have fewer than k, add random nodes not yet in the set
+        int n = instance.nodes.length;
+        for (int i = 0; i < n && nodeList.size() < k; i++) {
+            if (!nodeList.contains(i)) {
+                nodeList.add(i);
             }
         }
 
-        return currentSol;
+        // Now we have exactly k nodes. We must form a path or cycle from them.
+        // We can simply shuffle them or perform a small greedy for edges.
+        // Here, let's just shuffle them.
+        Collections.shuffle(nodeList, rand);
+
+        int[] childArr = nodeList.stream().mapToInt(i -> i).toArray();
+        int objValue = computeObjective(childArr, instance);
+        return new Solution(childArr, objValue);
     }
 
-    private Solution destroy(Solution solution) {
-        // Destroy operator: remove a fraction of nodes from solution
-        // We'll remove about destroyFraction * k nodes randomly
-        List<Integer> pathList = Arrays.stream(solution.path).boxed().collect(Collectors.toList());
-        int removeCount = (int) Math.ceil(destroyFraction * pathList.size());
+    /**
+     * Recombination Operator 2:
+     *  - Pick parent1 as the base.
+     *  - Remove from it all nodes (edges) that are not in parent2.
+     *  - Repair the solution using the same approach as in LNS (Greedy Weighted Regret).
+     */
+    private Solution recombineOperator2(Solution parent1, Solution parent2) {
+        // Convert parent2 path into a set for quick membership check
+        Set<Integer> parent2Set = Arrays.stream(parent2.path).boxed().collect(Collectors.toSet());
 
-        // Remove random nodes (not the entire path, but chosen at random)
-        for (int i = 0; i < removeCount; i++) {
-            int removeIndex = random.nextInt(pathList.size());
-            pathList.remove(removeIndex);
+        // Copy parent1's path
+        List<Integer> childPath = Arrays.stream(parent1.path).boxed().collect(Collectors.toList());
+
+        // Remove nodes in childPath not in parent2
+        childPath.removeIf(node -> !parent2Set.contains(node));
+
+        // Now we have a partial solution
+        // Use Greedy Weighted Regret to repair up to k nodes
+        Set<Integer> selected = new HashSet<>(childPath);
+        // Reuse the same 'repairHeuristic' approach from LNS
+        Solution repaired = repairHeuristic.generateSolution(instance, childPath, selected, k);
+        int[] repairedPath = repaired.path;
+
+        return new Solution(repairedPath, repaired.objectiveValue);
+    }
+
+    /**
+     * Replaces the worst solution in the population (steady-state) with the new offspring.
+     * Alternatively, you could replace a random or near-worst solution.
+     */
+    private void replaceWorstSolution(List<Solution> population, Solution offspring) {
+        int worstIndex = 0;
+        int worstObj = population.get(0).objectiveValue;
+        for (int i = 1; i < population.size(); i++) {
+            if (population.get(i).objectiveValue > worstObj) {
+                worstObj = population.get(i).objectiveValue;
+                worstIndex = i;
+            }
         }
-
-        int[] newPath = pathList.stream().mapToInt(Integer::intValue).toArray();
-        int newObjective = computeObjective(newPath, instance);
-        return new Solution(newPath, newObjective);
+        population.set(worstIndex, offspring);
     }
 
-    private Solution repair(Solution partialSolution) {
-        // Use the GreedyWeightedRegret to insert nodes until we have k nodes again
-        Set<Integer> selected = Arrays.stream(partialSolution.path).boxed().collect(Collectors.toSet());
-        List<Integer> partialPath = Arrays.stream(partialSolution.path).boxed().collect(Collectors.toList());
-
-        return repairHeuristic.generateSolution(instance, partialPath, selected, k);
+    /**
+     * Checks whether 'offspring' is a duplicate of any solution in 'population'.
+     * We can compare by objective value or by checking identical path.
+     * Here, to be safe, we check both.
+     */
+    private boolean isDuplicate(List<Solution> population, Solution offspring) {
+        for (Solution sol : population) {
+            // Check objective equality
+            if (sol.objectiveValue == offspring.objectiveValue) {
+                // Also check if path is the same set of nodes (order not necessarily the same)
+                if (samePath(sol.path, offspring.path)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
+    /**
+     * Checks if two solutions contain the same path (same set of nodes).
+     * You can refine this check (e.g., sort, or check rotation invariances).
+     */
+    private boolean samePath(int[] path1, int[] path2) {
+        if (path1.length != path2.length)
+            return false;
+        Set<Integer> s1 = Arrays.stream(path1).boxed().collect(Collectors.toSet());
+        Set<Integer> s2 = Arrays.stream(path2).boxed().collect(Collectors.toSet());
+        return s1.equals(s2);
+    }
+
+    /**
+     * Finds the solution with minimum objective in the list.
+     */
+    private Solution findBest(List<Solution> solutions) {
+        Solution best = solutions.get(0);
+        for (Solution s : solutions) {
+            if (s.objectiveValue < best.objectiveValue) {
+                best = s;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Converts a path into a set of edges (u,v) pairs.
+     */
+    private Set<Edge> getEdgeSet(int[] path) {
+        Set<Edge> edges = new HashSet<>();
+        int n = path.length;
+        for (int i = 0; i < n; i++) {
+            int u = path[i];
+            int v = path[(i + 1) % n];
+            // store undirected edge (ensure smaller index first if you want to treat it as undirected)
+            if (u < v)
+                edges.add(new Edge(u, v));
+            else
+                edges.add(new Edge(v, u));
+        }
+        return edges;
+    }
+
+    /**
+     * Shuffle an array in place.
+     */
     private void shuffleArray(int[] array) {
         int index, temp;
         for (int i = array.length - 1; i > 0; i--) {
-            index = random.nextInt(i + 1);
+            index = rand.nextInt(i + 1);
             temp = array[index];
             array[index] = array[i];
             array[i] = temp;
+        }
+    }
+
+    /**
+     * Simple Edge class for storing edges in an undirected manner.
+     */
+    private static class Edge {
+        int u;
+        int v;
+
+        Edge(int u, int v) {
+            this.u = u;
+            this.v = v;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj)
+                return true;
+            if (!(obj instanceof Edge))
+                return false;
+            Edge other = (Edge) obj;
+            return (this.u == other.u && this.v == other.v);
+        }
+
+        @Override
+        public int hashCode() {
+            // typical way to combine two ints for a hash
+            return 31 * u + v;
         }
     }
 }
@@ -622,28 +798,22 @@ class LargeNeighborhoodSearch extends Heuristic {
 /**
  * Utility class to compute statistics for a list of solutions.
  */
-class Statistics {
+class StatisticsHelper {
     final int minObjective;
     final int maxObjective;
     final double avgObjective;
     final int[] bestPath;
 
-    Statistics(int minObjective, int maxObjective, double avgObjective, int[] bestPath) {
+    StatisticsHelper(int minObjective, int maxObjective, double avgObjective, int[] bestPath) {
         this.minObjective = minObjective;
         this.maxObjective = maxObjective;
         this.avgObjective = avgObjective;
         this.bestPath = bestPath;
     }
 
-    /**
-     * Computes statistics from a list of solutions.
-     *
-     * @param solutions List of Solution objects
-     * @return A Statistics object
-     */
-    static Statistics computeStatistics(List<Solution> solutions) {
+    static StatisticsHelper computeStatistics(List<Solution> solutions) {
         if (solutions == null || solutions.isEmpty()) {
-            return new Statistics(0, 0, 0.0, new int[0]);
+            return new StatisticsHelper(0, 0, 0.0, new int[0]);
         }
         int min = Integer.MAX_VALUE;
         int max = Integer.MIN_VALUE;
@@ -661,11 +831,14 @@ class Statistics {
             sum += obj;
         }
         double avg = (double) sum / solutions.size();
-        return new Statistics(min, max, avg, bestPath);
+        return new StatisticsHelper(min, max, avg, bestPath);
     }
 }
 
-public class Main {
+/**
+ * Implements a Hybrid Evolutionary Algorithm (HEA).
+ */
+class HybridEvolutionaryAlgorithmMain {
     public static void main(String[] args) {
         String inputDirPath = "inputs";
         File inputDir = new File(inputDirPath);
@@ -685,23 +858,17 @@ public class Main {
             return;
         }
 
-        // According to the instructions, we use the average running time of MSLS from previous problem (~870 ms)
-        // as the stopping criterion for LNS to allow fair comparison.
+        // Use average running time from previous problem (~870 ms)
         double maxTimeMs = 870.0;
 
-        // We will implement and test two versions of LNS:
-        // 1. LNS with local search after each destroy-repair iteration
-        // 2. LNS without local search after each destroy-repair iteration
-        // Always apply local search to the initial solution inside the LNS.
-
+        // Process each input file
         for (File inputFile : inputFiles) {
             String fileName = inputFile.getName();
-            String instanceName = fileName.substring(0, fileName.lastIndexOf('.')); // Remove .csv extension
+            String instanceName = fileName.substring(0, fileName.lastIndexOf('.'));
             String filePath = inputFile.getPath();
 
             System.out.println("Processing instance: " + instanceName);
 
-            // Initialize problem instance
             ProblemInstance instance;
             try {
                 System.out.println("Reading nodes from CSV...");
@@ -723,7 +890,6 @@ public class Main {
             int k = (int) Math.ceil(n / 2.0);
             System.out.println("Total nodes: " + n + ", Selecting k=" + k + " nodes.\n");
 
-            // Prepare output directory for this instance
             String outputInstanceDirPath = "outputs/" + instanceName;
             File outputInstanceDir = new File(outputInstanceDirPath);
             if (!outputInstanceDir.exists()) {
@@ -734,109 +900,90 @@ public class Main {
                 }
             }
 
-            // Run LNS with local search after each iteration
-            System.out.println("Running LNS with local search after each iteration...");
-            List<Solution> lnsWithLSsolutions = new ArrayList<>();
-            List<Integer> lnsWithLSIterations = new ArrayList<>();
-            double totalLnsWithLsTime = 0.0;
+            // Running Hybrid Evolutionary Algorithm (HEA) with local search after recombination
+            System.out.println("Running Hybrid Evolutionary Algorithm (HEA) with local search after recombination...");
+            List<Solution> heaWithLSsolutions = new ArrayList<>();
+            List<Integer> heaWithLSIterations = new ArrayList<>();
+            double totalHeaWithLsTime = 0.0;
 
             for (int run = 0; run < 20; run++) {
-                LargeNeighborhoodSearch lns = new LargeNeighborhoodSearch(instance, k, maxTimeMs, true);
+                HybridEvolutionaryAlgorithm hea = new HybridEvolutionaryAlgorithm(instance, k, maxTimeMs, true);
                 long startTime = System.nanoTime();
-                Solution sol = lns.run();
+                Solution sol = hea.run();
                 long endTime = System.nanoTime();
                 double durationMs = (endTime - startTime) / 1e6;
-                totalLnsWithLsTime += durationMs;
-                lnsWithLSsolutions.add(sol);
-                lnsWithLSIterations.add(lns.numIterations);
+                totalHeaWithLsTime += durationMs;
+
+                heaWithLSsolutions.add(sol);
+                heaWithLSIterations.add(hea.numIterations);
             }
 
-            double avgLnsWithLsTime = totalLnsWithLsTime / 20;
-            double avgLnsWithLsIterations = lnsWithLSIterations.stream().mapToDouble(a -> a).average().orElse(0.0);
+            double avgHeaWithLsTime = totalHeaWithLsTime / 20;
+            double avgHeaWithLsIterations = heaWithLSIterations.stream().mapToDouble(a -> a).average().orElse(0.0);
+            StatisticsHelper heaWithLSStats = StatisticsHelper.computeStatistics(heaWithLSsolutions);
 
-            Statistics lnsWithLSStats = Statistics.computeStatistics(lnsWithLSsolutions);
-
-            // Run LNS without local search after each iteration
-            System.out.println("Running LNS without local search after each iteration...");
-            List<Solution> lnsNoLSsolutions = new ArrayList<>();
-            List<Integer> lnsNoLSIterations = new ArrayList<>();
-            double totalLnsNoLsTime = 0.0;
+            // Running Hybrid Evolutionary Algorithm (HEA) without local search after recombination
+            System.out.println("Running Hybrid Evolutionary Algorithm (HEA) without local search after recombination...");
+            List<Solution> heaNoLSsolutions = new ArrayList<>();
+            List<Integer> heaNoLSIterations = new ArrayList<>();
+            double totalHeaNoLsTime = 0.0;
 
             for (int run = 0; run < 20; run++) {
-                LargeNeighborhoodSearch lns = new LargeNeighborhoodSearch(instance, k, maxTimeMs, false);
+                HybridEvolutionaryAlgorithm hea = new HybridEvolutionaryAlgorithm(instance, k, maxTimeMs, false);
                 long startTime = System.nanoTime();
-                Solution sol = lns.run();
+                Solution sol = hea.run();
                 long endTime = System.nanoTime();
                 double durationMs = (endTime - startTime) / 1e6;
-                totalLnsNoLsTime += durationMs;
-                lnsNoLSsolutions.add(sol);
-                lnsNoLSIterations.add(lns.numIterations);
+                totalHeaNoLsTime += durationMs;
+
+                heaNoLSsolutions.add(sol);
+                heaNoLSIterations.add(hea.numIterations);
             }
 
-            double avgLnsNoLsTime = totalLnsNoLsTime / 20;
-            double avgLnsNoLsIterations = lnsNoLSIterations.stream().mapToDouble(a -> a).average().orElse(0.0);
-
-            Statistics lnsNoLSStats = Statistics.computeStatistics(lnsNoLSsolutions);
+            double avgHeaNoLsTime = totalHeaNoLsTime / 20;
+            double avgHeaNoLsIterations = heaNoLSIterations.stream().mapToDouble(a -> a).average().orElse(0.0);
+            StatisticsHelper heaNoLSStats = StatisticsHelper.computeStatistics(heaNoLSsolutions);
 
             // Output results
-            System.out.println("\n--- LNS Computational Results for Instance: " + instanceName + " ---\n");
+            System.out.println("\n--- Computational Results for Instance: " + instanceName + " ---\n");
 
-            // Results for LNS with LS
-            System.out.println("Method: LNS with local search after each iteration");
-            System.out.println("Min Objective: " + lnsWithLSStats.minObjective);
-            System.out.println("Max Objective: " + lnsWithLSStats.maxObjective);
-            System.out.printf("Average Objective: %.2f%n", lnsWithLSStats.avgObjective);
-            System.out.printf("Average Time per run: %.2f ms%n", avgLnsWithLsTime);
-            System.out.printf("Average Number of Iterations: %.2f%n", avgLnsWithLsIterations);
-            System.out.println("Best Solution Path: " + Arrays.toString(lnsWithLSStats.bestPath) + "\n");
+            // HEA with Local Search
+            System.out.println("Method: HEA with local search after recombination");
+            System.out.println("Min Objective: " + heaWithLSStats.minObjective);
+            System.out.println("Max Objective: " + heaWithLSStats.maxObjective);
+            System.out.printf("Average Objective: %.2f%n", heaWithLSStats.avgObjective);
+            System.out.printf("Average Time per run: %.2f ms%n", avgHeaWithLsTime);
+            System.out.printf("Average Number of Iterations: %.2f%n", avgHeaWithLsIterations);
+            System.out.println("Best Solution Path: " + Arrays.toString(heaWithLSStats.bestPath) + "\n");
 
-            // Save best path for LNS with LS
-            String lnsWithLSFileName = outputInstanceDirPath + "/LNS_with_LS.csv";
+            String heaWithLSFileName = outputInstanceDirPath + "/HEA_with_LS.csv";
             try {
-                saveBestPathToCSV(lnsWithLSStats.bestPath, lnsWithLSFileName);
-                System.out.println("Best path for LNS with LS saved to " + lnsWithLSFileName + "\n");
+                saveBestPathToCSV(heaWithLSStats.bestPath, heaWithLSFileName);
+                System.out.println("Best path for HEA with LS saved to " + heaWithLSFileName + "\n");
             } catch (IOException e) {
-                System.err.println("Error writing best path to CSV for LNS with LS: " + e.getMessage());
+                System.err.println("Error writing best path to CSV for HEA with LS: " + e.getMessage());
             }
 
-            // Results for LNS without LS
-            System.out.println("Method: LNS without local search after each iteration");
-            System.out.println("Min Objective: " + lnsNoLSStats.minObjective);
-            System.out.println("Max Objective: " + lnsNoLSStats.maxObjective);
-            System.out.printf("Average Objective: %.2f%n", lnsNoLSStats.avgObjective);
-            System.out.printf("Average Time per run: %.2f ms%n", avgLnsNoLsTime);
-            System.out.printf("Average Number of Iterations: %.2f%n", avgLnsNoLsIterations);
-            System.out.println("Best Solution Path: " + Arrays.toString(lnsNoLSStats.bestPath) + "\n");
+            // HEA without Local Search
+            System.out.println("Method: HEA without local search after recombination");
+            System.out.println("Min Objective: " + heaNoLSStats.minObjective);
+            System.out.println("Max Objective: " + heaNoLSStats.maxObjective);
+            System.out.printf("Average Objective: %.2f%n", heaNoLSStats.avgObjective);
+            System.out.printf("Average Time per run: %.2f ms%n", avgHeaNoLsTime);
+            System.out.printf("Average Number of Iterations: %.2f%n", avgHeaNoLsIterations);
+            System.out.println("Best Solution Path: " + Arrays.toString(heaNoLSStats.bestPath) + "\n");
 
-            // Save best path for LNS without LS
-            String lnsNoLSFileName = outputInstanceDirPath + "/LNS_no_LS.csv";
+            String heaNoLSFileName = outputInstanceDirPath + "/HEA_no_LS.csv";
             try {
-                saveBestPathToCSV(lnsNoLSStats.bestPath, lnsNoLSFileName);
-                System.out.println("Best path for LNS without LS saved to " + lnsNoLSFileName + "\n");
+                saveBestPathToCSV(heaNoLSStats.bestPath, heaNoLSFileName);
+                System.out.println("Best path for HEA without LS saved to " + heaNoLSFileName + "\n");
             } catch (IOException e) {
-                System.err.println("Error writing best path to CSV for LNS without LS: " + e.getMessage());
+                System.err.println("Error writing best path to CSV for HEA without LS: " + e.getMessage());
             }
 
             System.out.println("Finished processing instance: " + instanceName + "\n");
         }
-
-        // Attempt to run Python script for plotting (if applicable)
-        String pythonScript = "Evolutionary Computation\\plots_results.py";
-        System.out.println("All instances processed. Executing '" + pythonScript + "'...");
-        try {
-            ProcessBuilder pb = new ProcessBuilder("python", pythonScript);
-            pb.inheritIO(); // Redirect output and error streams to the console
-            Process process = pb.start();
-            int exitCode = process.waitFor();
-            if (exitCode == 0) {
-                System.out.println("'" + pythonScript + "' executed successfully.");
-            } else {
-                System.err.println("'" + pythonScript + "' exited with code: " + exitCode);
-            }
-        } catch (Exception e) {
-            System.err.println("Error executing '" + pythonScript + "': " + e.getMessage());
         }
-    }
 
     /**
      * Saves the best path to a CSV file, with each node index on a separate line.
