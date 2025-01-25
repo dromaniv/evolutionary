@@ -1,4 +1,3 @@
-(edit test violinist)
 # Project Overview
 
 This project implements several heuristic algorithms to solve a variation of the Traveling Salesman Problem (TSP). Each node has x and y coordinates and an associated cost. The goal is to find a cycle that visits a subset of nodes (k nodes) minimizing the sum of path distances and node costs.
